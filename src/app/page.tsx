@@ -417,8 +417,9 @@ function SessionsPanel({ sessions, loading, onRefresh }: { sessions: Session[]; 
         <div className="card p-4 space-y-1 max-h-[600px] overflow-y-auto">
           <h3 className="section-title mb-3">All Sessions</h3>
           {sessions.map((s) => (
-            <button key={s.key} onClick={() => loadHistory(s.key)}
-              className={`w-full flex items-center justify-between py-2.5 px-3 rounded-lg text-left transition-all ${
+            <div key={s.key} 
+              onClick={() => loadHistory(s.key)}
+              className={`w-full flex items-center justify-between py-2.5 px-3 rounded-lg text-left transition-all cursor-pointer ${
                 selected === s.key ? "bg-[rgba(99,102,241,0.15)] border border-[var(--accent)]" : "hover:bg-[var(--bg-card-hover)] border border-transparent"
               }`}>
               <div>
@@ -437,7 +438,7 @@ function SessionsPanel({ sessions, loading, onRefresh }: { sessions: Session[]; 
                   <X size={10} />
                 </button>
               </div>
-            </button>
+            </div>
           ))}
         </div>
         <div className="card p-4 max-h-[600px] overflow-y-auto">
@@ -518,8 +519,46 @@ function AgentsPanel({ agents, loading, onRefresh }: { agents: Agent[]; loading?
   }, [agentProfiles]);
 
   function getAgentProfile(sessionKey: string) {
+    const session = subAgents.find(s => s.key === sessionKey);
+    const label = (session?.label as string) || "";
+    
+    // Default profiles for known sub-agents
+    const defaults: Record<string, { name: string; emoji: string; systemPrompt: string; color: string }> = {
+      "CodeMaster": {
+        name: "CodeMaster",
+        emoji: "💻",
+        systemPrompt: "You are CodeMaster, a specialized coding assistant. Your purpose is to write, review, debug, and optimize code. You excel at:\n- Writing clean, efficient code in any language\n- Debugging complex issues\n- Explaining code concepts clearly\n- Suggesting best practices and design patterns\n\nWhen given a coding task:\n1. First understand the requirements\n2. Write clean, well-commented code\n3. Explain your approach and any trade-offs\n4. Suggest improvements or alternatives\n\nAlways use markdown code blocks for code. Sign off as CodeMaster 💻",
+        color: "#3b82f6"
+      },
+      "ResearchBot": {
+        name: "ResearchBot",
+        emoji: "🔍",
+        systemPrompt: "You are ResearchBot, a specialized research and information gathering assistant. Your purpose is to find, analyze, and synthesize information. You excel at:\n- Searching for accurate, up-to-date information\n- Summarizing complex topics\n- Comparing options and providing recommendations\n- Fact-checking and verifying sources\n\nWhen given a research task:\n1. Break down what information is needed\n2. Provide comprehensive, accurate answers\n3. Cite sources when possible\n4. Highlight any uncertainties or gaps in information\n\nSign off as ResearchBot 🔍",
+        color: "#8b5cf6"
+      },
+      "CreativeWriter": {
+        name: "CreativeWriter",
+        emoji: "✍️",
+        systemPrompt: "You are CreativeWriter, a specialized creative writing assistant. Your purpose is to help with storytelling, content creation, and creative projects. You excel at:\n- Writing engaging stories and narratives\n- Crafting compelling copy and content\n- Brainstorming creative ideas\n- Editing and improving existing writing\n\nWhen given a creative task:\n1. Understand the tone, style, and audience\n2. Write original, engaging content\n3. Offer variations or alternatives\n4. Provide constructive feedback on user writing\n\nSign off as CreativeWriter ✍️",
+        color: "#ec4899"
+      },
+      "TaskPlanner": {
+        name: "TaskPlanner",
+        emoji: "📋",
+        systemPrompt: "You are TaskPlanner, a specialized project planning and task breakdown assistant. Your purpose is to help organize work and break down complex goals. You excel at:\n- Breaking large projects into manageable steps\n- Creating timelines and priorities\n- Identifying dependencies and risks\n- Suggesting tools and approaches\n\nWhen given a planning task:\n1. Understand the end goal\n2. Break it into clear, actionable steps\n3. Prioritize and sequence tasks logically\n4. Identify what resources or information is needed\n\nUse checkboxes (☐/☑) for task lists. Sign off as TaskPlanner 📋",
+        color: "#10b981"
+      }
+    };
+    
+    // Find matching default profile
+    for (const [key, profile] of Object.entries(defaults)) {
+      if (label.includes(key)) {
+        return agentProfiles[sessionKey] || profile;
+      }
+    }
+    
     return agentProfiles[sessionKey] || {
-      name: subAgents.find(s => s.key === sessionKey)?.label || "Unnamed Agent",
+      name: label || "Unnamed Agent",
       emoji: "🤖",
       systemPrompt: "",
       color: "#6366f1"
