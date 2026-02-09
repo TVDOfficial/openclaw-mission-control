@@ -845,10 +845,10 @@ function ModelsPanel() {
       <div className="card p-5">
         <h2 className="section-title mb-4">Available Models by Provider</h2>
         {Object.entries(KNOWN_MODELS).map(([provider, models]) => {
-          const hasAuth = authProviders.some(p => p.name === provider || p.name.startsWith(provider))
-            || Object.keys(cfg?.auth?.profiles || {}).some(k => k === provider || k.startsWith(provider + ":"));
+          const hasAuthProfile = Object.keys(cfg?.auth?.profiles || {}).some(k => k === provider || k.startsWith(provider + ":"));
+          const hasLiveAuth = authProviders.some(p => p.name === provider || p.name.startsWith(provider));
           const hasConfig = !!modelProviders[provider];
-          const isAvailable = hasAuth || hasConfig;
+          const isAvailable = hasAuthProfile || hasLiveAuth || hasConfig;
           return (
             <div key={provider} className="mb-4">
               <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
@@ -956,22 +956,19 @@ function BotHubPanel() {
     setTimeout(() => setFeedback(""), 3000);
   }
 
-  // Build model options - include all known models for authenticated providers
+  // Build model options from ALL known models + config
   function getAllOptions(): { id: string; label: string }[] {
     if (!cfg) return [{ id: "", label: "Loading..." }];
     const opts: { id: string; label: string }[] = [{ id: "", label: "— Not set —" }];
-    // From auth profiles → known models
-    for (const profileKey of Object.keys(cfg?.auth?.profiles || {})) {
-      const base = profileKey.split(":")[0];
-      if (KNOWN_MODELS[base]) {
-        for (const km of KNOWN_MODELS[base]) {
-          if (!opts.find(o => o.id === km.id)) {
-            opts.push({ id: km.id, label: `${km.label} (${km.cost})` });
-          }
+    // Always include ALL known models from all providers
+    for (const [provider, models] of Object.entries(KNOWN_MODELS)) {
+      for (const km of models) {
+        if (!opts.find(o => o.id === km.id)) {
+          opts.push({ id: km.id, label: `${km.label} [${provider}] (${km.cost})` });
         }
       }
     }
-    // From config providers
+    // From config custom providers
     const providers = cfg?.models?.providers || {};
     for (const [pk, pv] of Object.entries(providers)) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -981,14 +978,6 @@ function BotHubPanel() {
           const id = `${pk}/${m.id}`;
           if (!opts.find(o => o.id === id)) {
             opts.push({ id, label: `${m.name || m.id} (${pk})` });
-          }
-        }
-      }
-      const knownKey = pk.includes("ollama") ? "ollama-local" : pk;
-      if (KNOWN_MODELS[knownKey]) {
-        for (const km of KNOWN_MODELS[knownKey]) {
-          if (!opts.find(o => o.id === km.id)) {
-            opts.push({ id: km.id, label: `${km.label} (${km.cost})` });
           }
         }
       }
