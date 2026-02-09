@@ -219,7 +219,7 @@ function DashboardPanel({ health, sessions, isOnline, loading, onRefresh }: {
   async function checkUpdate() {
     setUpdating(true); setUpdateOut("Checking...");
     try {
-      const r = await runExec("openclaw update --check 2>&1 || true");
+      const r = await runExec("openclaw update --json --yes 2>&1 | head -50 || true");
       setUpdateOut(r.stdout || r.stderr || "No output");
     } catch (e: unknown) { setUpdateOut(String(e)); }
     setUpdating(false);
@@ -955,23 +955,15 @@ function BotHubPanel() {
                 <div className="text-xs text-[var(--text-secondary)]">{r.desc}</div>
                 <div className="text-xs text-[var(--cyan)] mt-1">💡 {r.rec}</div>
               </div>
-              <div className="flex-1 flex gap-2">
-                <select
-                  className={`${selectCls} flex-1`}
-                  value={routing[r.key] || ""}
-                  onChange={(e) => setRouting({ ...routing, [r.key]: e.target.value })}
-                >
-                  {modelOptions.map((o) => (
-                    <option key={o.id} value={o.id}>{o.label}</option>
-                  ))}
-                </select>
-                <input
-                  className={`${inputCls} w-64`}
-                  placeholder="Or type custom model ID..."
-                  value={routing[r.key] || ""}
-                  onChange={(e) => setRouting({ ...routing, [r.key]: e.target.value })}
-                />
-              </div>
+              <select
+                className={`${selectCls} flex-1`}
+                value={routing[r.key] || ""}
+                onChange={(e) => setRouting({ ...routing, [r.key]: e.target.value })}
+              >
+                {modelOptions.map((o) => (
+                  <option key={o.id} value={o.id}>{o.label}</option>
+                ))}
+              </select>
             </div>
           ))}
         </div>
