@@ -474,6 +474,10 @@ function AgentsPanel({ agents, loading, onRefresh }: { agents: Agent[]; loading?
   const [subAgentMsg, setSubAgentMsg] = useState("");
   const [subAgentMsgs, setSubAgentMsgs] = useState<{role: string, content: string}[]>([]);
   const [subAgentSending, setSubAgentSending] = useState(false);
+  // Agent profiles (metadata for sub-agents)
+  const [agentProfiles, setAgentProfiles] = useState<Record<string, { name: string; emoji: string; systemPrompt: string; color: string }>>({});
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [editForm, setEditForm] = useState({ name: "", emoji: "", systemPrompt: "", color: "#6366f1" });
 
   async function fetchSubAgents() {
     setSubAgentsLoading(true);
@@ -481,21 +485,66 @@ function AgentsPanel({ agents, loading, onRefresh }: { agents: Agent[]; loading?
       const data = await invokeTool("sessions_list", { limit: 50 });
       const sessions = Array.isArray(data?.sessions) ? data.sessions : [];
       // Filter for sub-agents (sessions with labels like CodeMaster, ResearchBot, etc.)
-      const labeled = sessions.filter((s: Session) => 
-        s.label && (
-          s.label.includes("CodeMaster") ||
-          s.label.includes("ResearchBot") ||
-          s.label.includes("CreativeWriter") ||
-          s.label.includes("TaskPlanner") ||
-          s.label.includes("BotHub-")
-        )
-      );
+      const labeled = sessions.filter((s: Session) => {
+        const label = (s.label as string) || "";
+        return (
+          label.includes("CodeMaster") ||
+          label.includes("ResearchBot") ||
+          label.includes("CreativeWriter") ||
+          label.includes("TaskPlanner") ||
+          label.includes("BotHub-")
+        );
+      });
       setSubAgents(labeled);
     } catch { setSubAgents([]); }
     setSubAgentsLoading(false);
   }
 
   useEffect(() => { fetchSubAgents(); }, []);
+
+  // Load agent profiles from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem("agent-profiles");
+    if (saved) {
+      try { setAgentProfiles(JSON.parse(saved)); } catch {}
+    }
+  }, []);
+
+  // Save agent profiles when they change
+  useEffect(() => {
+    if (Object.keys(agentProfiles).length > 0) {
+      localStorage.setItem("agent-profiles", JSON.stringify(agentProfiles));
+    }
+  }, [agentProfiles]);
+
+  function getAgentProfile(sessionKey: string) {
+    return agentProfiles[sessionKey] || {
+      name: subAgents.find(s => s.key === sessionKey)?.label || "Unnamed Agent",
+      emoji: "🤖",
+      systemPrompt: "",
+      color: "#6366f1"
+    };
+  }
+
+  function startEditingProfile(session: Session) {
+    const profile = getAgentProfile(session.key);
+    setEditForm({
+      name: profile.name || (session.label as string) || "Unnamed",
+      emoji: profile.emoji || "🤖",
+      systemPrompt: profile.systemPrompt || "",
+      color: profile.color || "#6366f1"
+    });
+    setEditingProfile(true);
+  }
+
+  function saveAgentProfile() {
+    if (!selectedSubAgent) return;
+    setAgentProfiles(prev => ({
+      ...prev,
+      [selectedSubAgent.key]: { ...editForm }
+    }));
+    setEditingProfile(false);
+  }
 
   async function sendToSubAgent() {
     if (!subAgentMsg.trim() || !selectedSubAgent) return;
@@ -632,36 +681,137 @@ function AgentsPanel({ agents, loading, onRefresh }: { agents: Agent[]; loading?
           </button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {subAgents.map((s) => (
-            <div 
-              key={s.key} 
-              className={`card p-4 cursor-pointer transition-all ${selectedSubAgent?.key === s.key ? 'border-[var(--accent)] ring-1 ring-[var(--accent)]' : ''}`}
-              onClick={() => { setSelectedSubAgent(s); setSubAgentMsgs([]); }}
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-[rgba(99,102,241,0.15)] flex items-center justify-center">
-                  <Bot size={20} className="text-[var(--accent)]" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="font-semibold text-sm truncate">{s.label || s.agentId || "Unnamed"}</div>
-                  <div className="text-xs text-[var(--text-secondary)]">{s.model || "default model"}</div>
-                  <div className="text-xs text-[var(--text-secondary)] truncate" title={s.key}>{s.key.slice(-12)}</div>
+          {subAgents.map((s) => {
+            const profile = getAgentProfile(s.key);
+            return (
+              <div 
+                key={s.key} 
+                className={`card p-4 cursor-pointer transition-all ${selectedSubAgent?.key === s.key ? 'ring-2' : ''}`}
+                style={selectedSubAgent?.key === s.key ? { borderColor: profile.color, outlineColor: profile.color } : {}}
+                onClick={() => { setSelectedSubAgent(s); setSubAgentMsgs([]); setEditingProfile(false); }}
+              >
+                <div className="flex items-center gap-3">
+                  <div 
+                    className="w-10 h-10 rounded-full flex items-center justify-center text-lg shrink-0"
+                    style={{ backgroundColor: `${profile.color}20`, border: `2px solid ${profile.color}` }}
+                  >
+                    {profile.emoji || "🤖"}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-sm truncate">{profile.name || (s.label as string) || "Unnamed"}</div>
+                    <div className="text-xs text-[var(--text-secondary)]">{s.model || "default model"}</div>
+                    {profile.systemPrompt && (
+                      <div className="text-xs text-[var(--text-secondary)] truncate italic">Has custom prompt</div>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
           {subAgents.length === 0 && <p className="text-[var(--text-secondary)] text-sm col-span-full">No active sub-agents found. Spawn one above!</p>}
         </div>
 
-        {/* Chat with selected sub-agent */}
+        {/* Selected sub-agent profile & chat */}
         {selectedSubAgent && (
           <div className="mt-4 border-t border-[var(--border)] pt-4">
-            <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
-              <MessageSquare size={14} /> Chat with {selectedSubAgent.label || selectedSubAgent.agentId}
-            </h3>
-            <div className="bg-[var(--bg-primary)] rounded-lg border border-[var(--border)] p-3 max-h-[300px] overflow-y-auto mb-3 space-y-2">
+            {/* Profile Header */}
+            <div className="flex items-start gap-4 mb-4">
+              <div 
+                className="w-16 h-16 rounded-full flex items-center justify-center text-3xl shrink-0 cursor-pointer hover:scale-105 transition-transform"
+                style={{ backgroundColor: `${getAgentProfile(selectedSubAgent.key).color}20`, border: `2px solid ${getAgentProfile(selectedSubAgent.key).color}` }}
+                onClick={() => startEditingProfile(selectedSubAgent)}
+                title="Click to edit profile"
+              >
+                {getAgentProfile(selectedSubAgent.key).emoji}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-lg font-bold truncate">
+                    {getAgentProfile(selectedSubAgent.key).name || (selectedSubAgent.label as string) || "Unnamed Agent"}
+                  </h3>
+                  <button 
+                    onClick={() => startEditingProfile(selectedSubAgent)}
+                    className="text-xs text-[var(--accent)] hover:underline"
+                  >
+                    Edit
+                  </button>
+                </div>
+                <p className="text-xs text-[var(--text-secondary)]">{selectedSubAgent.model || "default model"}</p>
+                <p className="text-xs text-[var(--text-secondary)] truncate" title={selectedSubAgent.key}>{selectedSubAgent.key.slice(-16)}</p>
+                {getAgentProfile(selectedSubAgent.key).systemPrompt && (
+                  <p className="text-xs text-[var(--text-secondary)] mt-1 italic truncate">
+                    "{getAgentProfile(selectedSubAgent.key).systemPrompt.slice(0, 60)}..."
+                  </p>
+                )}
+              </div>
+            </div>
+
+            {/* Profile Editor */}
+            {editingProfile && (
+              <div className="bg-[var(--bg-primary)] rounded-lg border border-[var(--border)] p-4 mb-4 space-y-3">
+                <h4 className="text-sm font-semibold flex items-center gap-2">
+                  <Settings size={14} /> Edit Agent Profile
+                </h4>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs text-[var(--text-secondary)] block mb-1">Display Name</label>
+                    <input 
+                      className={inputCls} 
+                      value={editForm.name}
+                      onChange={(e) => setEditForm({...editForm, name: e.target.value})}
+                      placeholder="Agent name"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-[var(--text-secondary)] block mb-1">Emoji Avatar</label>
+                    <input 
+                      className={inputCls} 
+                      value={editForm.emoji}
+                      onChange={(e) => setEditForm({...editForm, emoji: e.target.value})}
+                      placeholder="🤖"
+                      maxLength={2}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-[var(--text-secondary)] block mb-1">System Prompt</label>
+                  <textarea 
+                    className={`${textareaCls} w-full min-h-[80px]`}
+                    value={editForm.systemPrompt}
+                    onChange={(e) => setEditForm({...editForm, systemPrompt: e.target.value})}
+                    placeholder="Enter system prompt for this agent..."
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-[var(--text-secondary)] block mb-1">Accent Color</label>
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="color"
+                      value={editForm.color}
+                      onChange={(e) => setEditForm({...editForm, color: e.target.value})}
+                      className="w-10 h-8 rounded cursor-pointer"
+                    />
+                    <span className="text-xs text-[var(--text-secondary)]">{editForm.color}</span>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={saveAgentProfile} className="btn-primary flex items-center gap-2">
+                    <Save size={14} /> Save Profile
+                  </button>
+                  <button onClick={() => setEditingProfile(false)} className="btn-secondary">
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Chat Section */}
+            <h4 className="text-sm font-medium mb-2 flex items-center gap-2">
+              <MessageSquare size={14} /> Chat
+            </h4>
+            <div className="bg-[var(--bg-primary)] rounded-lg border border-[var(--border)] p-3 max-h-[250px] overflow-y-auto mb-3 space-y-2">
               {subAgentMsgs.length === 0 && (
-                <p className="text-xs text-[var(--text-secondary)] italic">Send a message to start chatting with this sub-agent...</p>
+                <p className="text-xs text-[var(--text-secondary)] italic">Send a message to start chatting...</p>
               )}
               {subAgentMsgs.map((m, i) => (
                 <div key={i} className={`p-2 rounded text-sm ${m.role === "assistant" ? "bg-[rgba(99,102,241,0.1)]" : m.role === "user" ? "bg-[var(--bg-card)] ml-8" : "bg-[rgba(239,68,68,0.1)]"}`}>
@@ -674,7 +824,7 @@ function AgentsPanel({ agents, loading, onRefresh }: { agents: Agent[]; loading?
             <div className="flex gap-2">
               <input 
                 className={`${inputCls} flex-1`} 
-                placeholder={`Message ${selectedSubAgent.label || "sub-agent"}...`}
+                placeholder={`Message ${getAgentProfile(selectedSubAgent.key).name || "agent"}...`}
                 value={subAgentMsg}
                 onChange={(e) => setSubAgentMsg(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && sendToSubAgent()}
@@ -684,11 +834,12 @@ function AgentsPanel({ agents, loading, onRefresh }: { agents: Agent[]; loading?
                 onClick={sendToSubAgent} 
                 disabled={subAgentSending || !subAgentMsg.trim()}
                 className="btn-primary flex items-center gap-2"
+                style={{ backgroundColor: getAgentProfile(selectedSubAgent.key).color }}
               >
                 {subAgentSending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
               </button>
               <button 
-                onClick={() => { setSelectedSubAgent(null); setSubAgentMsgs([]); }}
+                onClick={() => { setSelectedSubAgent(null); setSubAgentMsgs([]); setEditingProfile(false); }}
                 className="btn-secondary flex items-center gap-2"
               >
                 <X size={14} />
