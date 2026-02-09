@@ -6,7 +6,7 @@ import {
   Activity, Bot, Clock, Cpu, Zap, Terminal, Settings, BrainCircuit,
   Play, Trash2, RefreshCw, Plus, Send, ChevronDown, ChevronRight,
   Circle, AlertCircle, CheckCircle2, Loader2, Satellite, LayoutDashboard,
-  Package, Layers, Network, Download, Save, X
+  Package, Layers, Network, Download, Save, X, MessageSquare, Key
 } from "lucide-react";
 
 /* ─── Types ─── */
@@ -41,6 +41,27 @@ const TABS = [
 ] as const;
 type TabId = (typeof TABS)[number]["id"];
 
+/* ─── Known models per provider ─── */
+const KNOWN_MODELS: Record<string, { id: string; label: string; cost: string; best: string }[]> = {
+  anthropic: [
+    { id: "anthropic/claude-opus-4-6", label: "Claude Opus 4", cost: "$$$", best: "Complex reasoning, coding" },
+    { id: "anthropic/claude-sonnet-4-20250514", label: "Claude Sonnet 4", cost: "$$", best: "Tool use, balanced" },
+    { id: "anthropic/claude-haiku-3-5-20241022", label: "Claude Haiku 3.5", cost: "$", best: "Fast, cheap tasks" },
+  ],
+  google: [
+    { id: "google/gemini-2.5-pro-preview", label: "Gemini 2.5 Pro", cost: "$$", best: "Long context, analysis" },
+    { id: "google/gemini-3-flash-preview", label: "Gemini 3 Flash", cost: "$", best: "Fast, cheap, summaries" },
+    { id: "google/gemini-2.5-flash-preview-05-20", label: "Gemini 2.5 Flash", cost: "$", best: "Fast tasks" },
+  ],
+  "ollama-local": [
+    { id: "ollama-local/qwen3:8b", label: "Qwen3 8B", cost: "Free", best: "Chat, local, free" },
+    { id: "ollama-local/llama3:8b", label: "Llama 3 8B", cost: "Free", best: "Chat, coding" },
+    { id: "ollama-local/mistral:7b", label: "Mistral 7B", cost: "Free", best: "General, fast" },
+    { id: "ollama-local/codellama:13b", label: "Code Llama 13B", cost: "Free", best: "Coding" },
+    { id: "ollama-local/deepseek-coder-v2:16b", label: "DeepSeek Coder V2", cost: "Free", best: "Coding" },
+  ],
+};
+
 /* ─── Helpers ─── */
 function ago(ts: string | number | undefined): string {
   if (!ts) return "—";
@@ -60,6 +81,7 @@ function StatusDot({ ok }: { ok: boolean }) {
   return <Circle size={10} fill={ok ? "var(--green)" : "var(--red)"} stroke="none" className={ok ? "status-pulse" : ""} />;
 }
 const inputCls = "bg-[var(--bg-primary)] border border-[var(--border)] rounded-lg px-3 py-2 text-sm text-[var(--text-primary)] focus:outline-none focus:border-[var(--accent)]";
+const selectCls = `${inputCls} cursor-pointer`;
 const textareaCls = `${inputCls} resize-y font-mono`;
 
 /* ─── Main ─── */
@@ -219,15 +241,12 @@ function DashboardPanel({ health, sessions, isOnline, loading, onRefresh }: {
           {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Refresh
         </button>
       </div>
-
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard label="Gateway" value={isOnline ? "ONLINE" : "OFFLINE"} icon={<Zap size={20} />} color={isOnline ? "var(--green)" : "var(--red)"} />
         <MetricCard label="Active Sessions" value={String(activeSessions.length)} icon={<Terminal size={20} />} color="var(--cyan)" />
         <MetricCard label="Total Sessions" value={String(sessions.length)} icon={<Cpu size={20} />} color="var(--accent)" />
         <MetricCard label="Model" value="Opus 4" icon={<BrainCircuit size={20} />} color="var(--orange)" sub="claude-opus-4-6" />
       </div>
-
-      {/* Update Section */}
       <div className="card p-5">
         <h2 className="section-title mb-4 flex items-center gap-2"><Download size={14} /> OpenClaw Updates</h2>
         <div className="flex gap-2 mb-3">
@@ -240,8 +259,6 @@ function DashboardPanel({ health, sessions, isOnline, loading, onRefresh }: {
         </div>
         {updateOut && <pre className="text-xs font-mono text-[var(--text-secondary)] bg-[var(--bg-primary)] p-3 rounded-lg overflow-auto max-h-40 whitespace-pre-wrap">{updateOut}</pre>}
       </div>
-
-      {/* Recent Sessions */}
       <div className="card p-5">
         <h2 className="section-title mb-4">Recent Sessions</h2>
         <div className="space-y-2">
@@ -297,6 +314,7 @@ function SessionsPanel({ sessions, loading, onRefresh }: { sessions: Session[]; 
     } catch { setHistory([]); }
     setHistoryLoading(false);
   }
+
   async function handleSend() {
     if (!sendMsg.trim() || !sendTarget.trim()) return;
     await invokeTool("sessions_send", { sessionKey: sendTarget, message: sendMsg });
@@ -364,6 +382,11 @@ function SessionsPanel({ sessions, loading, onRefresh }: { sessions: Session[]; 
 function AgentsPanel({ agents, loading, onRefresh }: { agents: Agent[]; loading?: boolean; onRefresh: () => void }) {
   const [task, setTask] = useState(""); const [label, setLabel] = useState(""); const [model, setModel] = useState("");
   const [spawning, setSpawning] = useState(false); const [spawnResult, setSpawnResult] = useState<string | null>(null);
+  // Chat box state
+  const [chatMsgs, setChatMsgs] = useState<{ role: string; content: string }[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatSession, setChatSession] = useState<string | null>(null);
+  const [chatLoading, setChatLoading] = useState(false);
 
   async function spawnAgent() {
     if (!task.trim()) return;
@@ -375,6 +398,35 @@ function AgentsPanel({ agents, loading, onRefresh }: { agents: Agent[]; loading?
       setSpawnResult(JSON.stringify(await invokeTool("sessions_spawn", args), null, 2));
     } catch (e: unknown) { setSpawnResult(e instanceof Error ? e.message : "Spawn failed"); }
     setSpawning(false);
+  }
+
+  async function startBotChat() {
+    setChatLoading(true);
+    setChatMsgs([{ role: "assistant", content: "Hi! I'll help you build a new bot. What should it be called, and what do you want it to do?" }]);
+    try {
+      const data = await invokeTool("sessions_spawn", {
+        task: "You are a bot creation assistant. Help the user design and configure a new OpenClaw agent/bot. Ask what they want it to be called, what it should do, what model to use, personality, etc. Guide them step by step. When they're done, output a summary config they can use.",
+        label: "Bot Builder Chat",
+      });
+      setChatSession(data?.childSessionKey || data?.sessionKey || null);
+    } catch { setChatMsgs(prev => [...prev, { role: "system", content: "Failed to start chat session." }]); }
+    setChatLoading(false);
+  }
+
+  async function sendChatMsg() {
+    if (!chatInput.trim() || !chatSession) return;
+    const msg = chatInput;
+    setChatInput("");
+    setChatMsgs(prev => [...prev, { role: "user", content: msg }]);
+    setChatLoading(true);
+    try {
+      const data = await invokeTool("sessions_send", { sessionKey: chatSession, message: msg });
+      const reply = typeof data === "string" ? data : data?.reply || data?.content || JSON.stringify(data);
+      setChatMsgs(prev => [...prev, { role: "assistant", content: reply }]);
+    } catch {
+      setChatMsgs(prev => [...prev, { role: "system", content: "Failed to send message." }]);
+    }
+    setChatLoading(false);
   }
 
   return (
@@ -399,6 +451,36 @@ function AgentsPanel({ agents, loading, onRefresh }: { agents: Agent[]; loading?
           {spawnResult && <pre className="text-xs bg-[var(--bg-primary)] p-3 rounded-lg border border-[var(--border)] overflow-auto max-h-40 font-mono text-[var(--text-secondary)]">{spawnResult}</pre>}
         </div>
       </div>
+
+      {/* Bot Builder Chat */}
+      <div className="card p-5">
+        <h2 className="section-title mb-4 flex items-center gap-2"><MessageSquare size={14} /> Bot Builder Chat</h2>
+        <p className="text-sm text-[var(--text-secondary)] mb-3">Use AI to help you design and build a new bot. The assistant will guide you through naming, capabilities, and configuration.</p>
+        {chatMsgs.length === 0 ? (
+          <button onClick={startBotChat} disabled={chatLoading} className="btn-primary flex items-center gap-2">
+            {chatLoading ? <Loader2 size={14} className="animate-spin" /> : <MessageSquare size={14} />} Start New Bot Chat
+          </button>
+        ) : (
+          <div>
+            <div className="bg-[var(--bg-primary)] rounded-lg border border-[var(--border)] p-3 max-h-[300px] overflow-y-auto mb-3 space-y-2">
+              {chatMsgs.map((m, i) => (
+                <div key={i} className={`p-2 rounded text-sm ${m.role === "assistant" ? "bg-[rgba(99,102,241,0.1)]" : m.role === "user" ? "bg-[var(--bg-card)] ml-8" : "bg-[rgba(239,68,68,0.1)]"}`}>
+                  <span className="text-xs font-semibold text-[var(--text-secondary)] uppercase">{m.role}</span>
+                  <p className="text-xs mt-1 whitespace-pre-wrap">{m.content}</p>
+                </div>
+              ))}
+              {chatLoading && <Loader2 size={14} className="animate-spin text-[var(--accent)]" />}
+            </div>
+            <div className="flex gap-2">
+              <input className={`${inputCls} flex-1`} placeholder="Type your message..." value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && sendChatMsg()} />
+              <button onClick={sendChatMsg} disabled={chatLoading} className="btn-primary flex items-center gap-2"><Send size={14} /></button>
+              <button onClick={() => { setChatMsgs([]); setChatSession(null); }} className="btn-secondary flex items-center gap-2"><X size={14} /></button>
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className="card p-5">
         <h2 className="section-title mb-4">Configured Agents</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -451,13 +533,13 @@ function CronPanel({ jobs, loading, onRefresh }: { jobs: CronJob[]; loading?: bo
           <h2 className="section-title mb-2">Create Cron Job</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <input className={inputCls} placeholder="Job name" value={newJob.name} onChange={(e) => setNewJob({ ...newJob, name: e.target.value })} />
-            <select className={inputCls} value={newJob.scheduleKind} onChange={(e) => setNewJob({ ...newJob, scheduleKind: e.target.value as "cron"|"every"|"at" })}>
+            <select className={selectCls} value={newJob.scheduleKind} onChange={(e) => setNewJob({ ...newJob, scheduleKind: e.target.value as "cron"|"every"|"at" })}>
               <option value="cron">Cron Expression</option><option value="every">Interval (ms)</option><option value="at">One-shot</option>
             </select>
             {newJob.scheduleKind === "cron" && <input className={inputCls} placeholder="e.g. 0 9 * * 1" value={newJob.expr} onChange={(e) => setNewJob({ ...newJob, expr: e.target.value })} />}
             {newJob.scheduleKind === "every" && <input className={inputCls} placeholder="Interval ms" value={newJob.everyMs} onChange={(e) => setNewJob({ ...newJob, everyMs: e.target.value })} />}
             {newJob.scheduleKind === "at" && <input className={inputCls} placeholder="ISO timestamp" value={newJob.at} onChange={(e) => setNewJob({ ...newJob, at: e.target.value })} />}
-            <select className={inputCls} value={newJob.sessionTarget} onChange={(e) => setNewJob({ ...newJob, sessionTarget: e.target.value as "isolated"|"main" })}>
+            <select className={selectCls} value={newJob.sessionTarget} onChange={(e) => setNewJob({ ...newJob, sessionTarget: e.target.value as "isolated"|"main" })}>
               <option value="isolated">Isolated Session</option><option value="main">Main Session</option>
             </select>
           </div>
@@ -505,7 +587,7 @@ function CronPanel({ jobs, loading, onRefresh }: { jobs: CronJob[]; loading?: bo
 
 /* ═══════════════════════ SKILLS ═══════════════════════ */
 function SkillsPanel() {
-  const [skills, setSkills] = useState<{ name: string; path: string; hasSkillMd: boolean }[]>([]);
+  const [skills, setSkills] = useState<{ name: string; path: string }[]>([]);
   const [loading, setLoading] = useState(false);
   const [output, setOutput] = useState("");
   const [installInput, setInstallInput] = useState("");
@@ -515,11 +597,10 @@ function SkillsPanel() {
     try {
       const r = await runExec("ls -d /home/tvd/.openclaw/workspace/skills/*/SKILL.md /home/linuxbrew/.linuxbrew/lib/node_modules/openclaw/skills/*/SKILL.md 2>/dev/null || echo ''");
       const paths = r.stdout.trim().split("\n").filter(Boolean);
-      const list = paths.map((p) => {
+      setSkills(paths.map((p) => {
         const parts = p.replace("/SKILL.md", "").split("/");
-        return { name: parts[parts.length - 1], path: p.replace("/SKILL.md", ""), hasSkillMd: true };
-      });
-      setSkills(list);
+        return { name: parts[parts.length - 1], path: p.replace("/SKILL.md", "") };
+      }));
     } catch { setSkills([]); }
     setLoading(false);
   }
@@ -527,18 +608,10 @@ function SkillsPanel() {
   useEffect(() => { fetchSkills(); }, []);
 
   async function checkUpdates() {
-    setOutput("Checking..."); 
+    setOutput("Checking for updates...");
     try {
-      const r = await runExec("clawhub outdated 2>&1");
+      const r = await runExec("cd /home/tvd/.openclaw/workspace && clawhub list 2>&1");
       setOutput(r.stdout || r.stderr || "Done");
-    } catch (e: unknown) { setOutput(String(e)); }
-  }
-
-  async function updateSkill(name: string) {
-    setOutput(`Updating ${name}...`);
-    try {
-      const r = await runExec(`clawhub install ${name} 2>&1`);
-      setOutput(r.stdout || r.stderr || "Done"); fetchSkills();
     } catch (e: unknown) { setOutput(String(e)); }
   }
 
@@ -546,8 +619,16 @@ function SkillsPanel() {
     if (!installInput.trim()) return;
     setOutput(`Installing ${installInput}...`);
     try {
-      const r = await runExec(`clawhub install ${installInput} 2>&1`);
+      const r = await runExec(`cd /home/tvd/.openclaw/workspace && clawhub install ${installInput} 2>&1`);
       setOutput(r.stdout || r.stderr || "Done"); setInstallInput(""); fetchSkills();
+    } catch (e: unknown) { setOutput(String(e)); }
+  }
+
+  async function updateSkill(name: string) {
+    setOutput(`Updating ${name}...`);
+    try {
+      const r = await runExec(`cd /home/tvd/.openclaw/workspace && clawhub update ${name} 2>&1`);
+      setOutput(r.stdout || r.stderr || "Done"); fetchSkills();
     } catch (e: unknown) { setOutput(String(e)); }
   }
 
@@ -560,15 +641,13 @@ function SkillsPanel() {
           <button onClick={fetchSkills} className="btn-secondary flex items-center gap-2">{loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}</button>
         </div>
       </div>
-
       <div className="card p-4">
         <h3 className="section-title mb-3">Install New Skill</h3>
         <div className="flex gap-2">
-          <input className={`${inputCls} flex-1`} placeholder="Skill name or URL..." value={installInput} onChange={(e) => setInstallInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && installSkill()} />
+          <input className={`${inputCls} flex-1`} placeholder="Skill slug (e.g. weather, gifgrep)..." value={installInput} onChange={(e) => setInstallInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && installSkill()} />
           <button onClick={installSkill} className="btn-primary flex items-center gap-2"><Plus size={14} /> Install</button>
         </div>
       </div>
-
       <div className="space-y-3">
         {skills.map((s) => (
           <div key={s.name} className="card p-4 flex items-center justify-between">
@@ -576,8 +655,7 @@ function SkillsPanel() {
               <Package size={18} className="text-[var(--accent)]" />
               <div>
                 <div className="font-semibold text-sm">{s.name}</div>
-                <div className="text-xs text-[var(--text-secondary)] font-mono">{s.path}</div>
-                {s.hasSkillMd && <span className="text-xs text-[var(--green)]">✓ SKILL.md</span>}
+                <div className="text-xs text-[var(--text-secondary)] font-mono truncate max-w-md">{s.path}</div>
               </div>
             </div>
             <button onClick={() => updateSkill(s.name)} className="btn-secondary text-xs py-1 px-2 flex items-center gap-1"><Download size={12} /> Update</button>
@@ -585,7 +663,6 @@ function SkillsPanel() {
         ))}
         {skills.length === 0 && !loading && <div className="card p-8 text-center text-[var(--text-secondary)]">No skills found</div>}
       </div>
-
       {output && <pre className="text-xs font-mono text-[var(--text-secondary)] bg-[var(--bg-primary)] p-3 rounded-lg overflow-auto max-h-60 whitespace-pre-wrap border border-[var(--border)]">{output}</pre>}
     </div>
   );
@@ -593,33 +670,74 @@ function SkillsPanel() {
 
 /* ═══════════════════════ MODELS ═══════════════════════ */
 function ModelsPanel() {
-  const [configData, setConfigData] = useState<Record<string, unknown> | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [cfg, setCfg] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState("");
+  const [newApiKey, setNewApiKey] = useState("");
+  const [newProvider, setNewProvider] = useState("anthropic");
 
   async function fetchConfig() {
     setLoading(true);
     try {
       const data = await invokeTool("gateway", { action: "config.get" });
-      setConfigData(data?.parsed || data?.config || data);
-    } catch { setConfigData(null); }
+      setCfg(data?.parsed || data?.config || data);
+    } catch { setCfg(null); }
     setLoading(false);
   }
   useEffect(() => { fetchConfig(); }, []);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const cfg = configData as any;
-  const models = cfg?.models || cfg?.model || {};
-  const providers = cfg?.providers || {};
+  const modelProviders = cfg?.models?.providers || {};
+  const agentModels = cfg?.agents?.defaults?.models || {};
+  const primaryModel = cfg?.agents?.defaults?.model?.primary || "Not set";
 
-  async function saveConfig(updated: Record<string, unknown>) {
-    setFeedback("Saving...");
+  // Build list of all available models from configured providers
+  function getAvailableModels(): { id: string; label: string; cost: string; best: string; provider: string }[] {
+    const models: { id: string; label: string; cost: string; best: string; provider: string }[] = [];
+    // Add models from config providers
+    for (const [providerKey, providerData] of Object.entries(modelProviders)) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const pd = providerData as any;
+      if (pd?.models && Array.isArray(pd.models)) {
+        for (const m of pd.models) {
+          models.push({ id: `${providerKey}/${m.id}`, label: m.name || m.id, cost: "Local", best: "Local model", provider: providerKey });
+        }
+      }
+      // Also add known models for this provider type
+      const knownKey = providerKey.includes("ollama") ? "ollama-local" : providerKey;
+      if (KNOWN_MODELS[knownKey]) {
+        for (const km of KNOWN_MODELS[knownKey]) {
+          if (!models.find(m => m.id === km.id)) {
+            models.push({ ...km, provider: providerKey });
+          }
+        }
+      }
+    }
+    // Add known models for auth profiles (anthropic, google)
+    for (const profileKey of Object.keys(cfg?.auth?.profiles || {})) {
+      const baseProvider = profileKey.split(":")[0];
+      if (KNOWN_MODELS[baseProvider]) {
+        for (const km of KNOWN_MODELS[baseProvider]) {
+          if (!models.find(m => m.id === km.id)) {
+            models.push({ ...km, provider: baseProvider });
+          }
+        }
+      }
+    }
+    return models;
+  }
+
+  async function setApiKeyEnv() {
+    if (!newApiKey.trim()) return;
+    setFeedback("Setting API key...");
     try {
-      const raw = JSON.stringify({ ...cfg, ...updated }, null, 2);
-      await invokeTool("gateway", { action: "config.apply", raw });
-      setFeedback("✓ Saved"); fetchConfig();
+      const envVar = newProvider === "anthropic" ? "ANTHROPIC_API_KEY" : newProvider === "google" ? "GOOGLE_API_KEY" : "OLLAMA_API_KEY";
+      // Write to .env in OpenClaw credentials
+      const r = await runExec(`echo "export ${envVar}=${newApiKey}" >> ~/.bashrc && echo "Set ${envVar}"`);
+      setFeedback(`✓ ${r.stdout.trim() || "API key set"} — restart OpenClaw to apply`);
+      setNewApiKey("");
     } catch (e: unknown) { setFeedback(`Error: ${e}`); }
-    setTimeout(() => setFeedback(""), 3000);
+    setTimeout(() => setFeedback(""), 5000);
   }
 
   return (
@@ -632,16 +750,88 @@ function ModelsPanel() {
       </div>
       {feedback && <div className={`text-sm px-3 py-2 rounded-lg ${feedback.startsWith("✓") ? "bg-[rgba(34,197,94,0.15)] text-[var(--green)]" : feedback.startsWith("Error") ? "bg-[rgba(239,68,68,0.15)] text-[var(--red)]" : "text-[var(--text-secondary)]"}`}>{feedback}</div>}
 
+      {/* Primary Model */}
       <div className="card p-5">
-        <h2 className="section-title mb-4">Model Configuration</h2>
-        <pre className="text-xs font-mono text-[var(--text-secondary)] bg-[var(--bg-primary)] p-3 rounded-lg overflow-auto max-h-60">{JSON.stringify(models, null, 2)}</pre>
+        <h2 className="section-title mb-4">Primary Model</h2>
+        <div className="flex items-center gap-3">
+          <BrainCircuit size={24} className="text-[var(--accent)]" />
+          <div>
+            <div className="text-lg font-bold text-[var(--accent)]">{primaryModel}</div>
+            <div className="text-xs text-[var(--text-secondary)]">Set in agents.defaults.model.primary — edit in Configuration tab</div>
+          </div>
+        </div>
       </div>
 
+      {/* Configured Model Aliases */}
       <div className="card p-5">
-        <h2 className="section-title mb-4">Providers</h2>
-        {Object.keys(providers).length > 0 ? (
+        <h2 className="section-title mb-4">Configured Models & Aliases</h2>
+        <div className="space-y-2">
+          {Object.entries(agentModels).map(([modelId, config]) => {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const alias = (config as any)?.alias;
+            return (
+              <div key={modelId} className="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--border)]">
+                <div>
+                  <span className="font-mono text-sm">{modelId}</span>
+                  {alias && <span className="text-xs ml-2 px-2 py-0.5 rounded-full bg-[rgba(99,102,241,0.15)] text-[var(--accent)]">alias: {alias}</span>}
+                </div>
+                <CheckCircle2 size={16} className="text-[var(--green)]" />
+              </div>
+            );
+          })}
+          {Object.keys(agentModels).length === 0 && <p className="text-sm text-[var(--text-secondary)]">No model aliases configured</p>}
+        </div>
+      </div>
+
+      {/* Available Models by Provider */}
+      <div className="card p-5">
+        <h2 className="section-title mb-4">Available Models</h2>
+        {(() => {
+          const allModels = getAvailableModels();
+          const providers = [...new Set(allModels.map(m => m.provider))];
+          return providers.map(p => (
+            <div key={p} className="mb-4">
+              <h3 className="text-sm font-semibold mb-2 text-[var(--accent)]">{p}</h3>
+              <div className="space-y-1">
+                {allModels.filter(m => m.provider === p).map(m => (
+                  <div key={m.id} className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-[var(--bg-card-hover)]">
+                    <div>
+                      <span className="font-mono text-sm">{m.label}</span>
+                      <span className="text-xs text-[var(--text-secondary)] ml-2">{m.id}</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${m.cost === "Free" ? "bg-[rgba(34,197,94,0.15)] text-[var(--green)]" : m.cost === "$" ? "bg-[rgba(6,182,212,0.15)] text-[var(--cyan)]" : m.cost === "$$" ? "bg-[rgba(234,179,8,0.15)] text-[var(--yellow)]" : "bg-[rgba(239,68,68,0.15)] text-[var(--red)]"}`}>{m.cost}</span>
+                      <span className="text-xs text-[var(--text-secondary)]">{m.best}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ));
+        })()}
+      </div>
+
+      {/* API Keys */}
+      <div className="card p-5">
+        <h2 className="section-title mb-4 flex items-center gap-2"><Key size={14} /> API Keys</h2>
+        <p className="text-sm text-[var(--text-secondary)] mb-3">Set API keys for model providers. Keys are stored as environment variables.</p>
+        <div className="flex gap-2">
+          <select className={`${selectCls} w-40`} value={newProvider} onChange={(e) => setNewProvider(e.target.value)}>
+            <option value="anthropic">Anthropic</option>
+            <option value="google">Google</option>
+            <option value="ollama">Ollama (local)</option>
+          </select>
+          <input className={`${inputCls} flex-1`} type="password" placeholder="API key..." value={newApiKey} onChange={(e) => setNewApiKey(e.target.value)} />
+          <button onClick={setApiKeyEnv} className="btn-primary flex items-center gap-2"><Save size={14} /> Set Key</button>
+        </div>
+      </div>
+
+      {/* Providers Config */}
+      <div className="card p-5">
+        <h2 className="section-title mb-4">Model Providers (from config)</h2>
+        {Object.keys(modelProviders).length > 0 ? (
           <div className="space-y-3">
-            {Object.entries(providers).map(([k, v]) => (
+            {Object.entries(modelProviders).map(([k, v]) => (
               <div key={k} className="bg-[var(--bg-primary)] p-3 rounded-lg border border-[var(--border)]">
                 <div className="font-semibold text-sm mb-1">{k}</div>
                 <pre className="text-xs font-mono text-[var(--text-secondary)] overflow-auto">{JSON.stringify(v, null, 2)}</pre>
@@ -649,14 +839,8 @@ function ModelsPanel() {
             ))}
           </div>
         ) : (
-          <p className="text-[var(--text-secondary)] text-sm">Providers configured via environment or defaults. Edit in Configuration tab.</p>
+          <p className="text-[var(--text-secondary)] text-sm">No custom model providers configured. Using default provider endpoints.</p>
         )}
-      </div>
-
-      <div className="card p-5">
-        <h2 className="section-title mb-4">Quick Actions</h2>
-        <p className="text-sm text-[var(--text-secondary)] mb-3">For detailed model/provider changes, use the Configuration tab to edit the raw config directly.</p>
-        <button onClick={() => saveConfig({})} className="btn-secondary text-sm">Reload Config</button>
       </div>
     </div>
   );
@@ -664,45 +848,91 @@ function ModelsPanel() {
 
 /* ═══════════════════════ BOTHUB ═══════════════════════ */
 function BotHubPanel() {
-  const [configData, setConfigData] = useState<Record<string, unknown> | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [cfg, setCfg] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState("");
+  const [routing, setRouting] = useState<Record<string, string>>({});
 
   const roles = [
-    { key: "chat", label: "💬 Chat", desc: "General conversation" },
-    { key: "tools", label: "🔧 Tool Use", desc: "Function calling & tool use" },
-    { key: "image", label: "🖼️ Image Analysis", desc: "Vision & image tasks" },
-    { key: "code", label: "💻 Code", desc: "Code generation & review" },
-    { key: "fast", label: "⚡ Fast Tasks", desc: "Quick lookups, summaries" },
+    { key: "chat", label: "💬 Chat", desc: "General conversation", rec: "ollama-local/qwen3:8b (Free) or google/gemini-3-flash-preview ($)" },
+    { key: "tools", label: "🔧 Tool Use", desc: "Function calling & tool use", rec: "anthropic/claude-sonnet-4-20250514 (Best at tools)" },
+    { key: "image", label: "🖼️ Image Analysis", desc: "Vision & image tasks", rec: "google/gemini-2.5-pro-preview or anthropic/claude-sonnet-4-20250514" },
+    { key: "code", label: "💻 Code", desc: "Code generation & review", rec: "anthropic/claude-opus-4-6 (Best) or ollama-local/qwen3:8b (Free)" },
+    { key: "fast", label: "⚡ Fast Tasks", desc: "Quick lookups, summaries", rec: "google/gemini-3-flash-preview ($) or ollama-local/qwen3:8b (Free)" },
   ];
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [routing, setRouting] = useState<Record<string, string>>({});
 
   async function fetchConfig() {
     setLoading(true);
     try {
       const data = await invokeTool("gateway", { action: "config.get" });
-      const cfg = data?.parsed || data?.config || data;
-      setConfigData(cfg);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const r = (cfg as any)?.bothub?.routing || (cfg as any)?.modelRouting || {};
-      setRouting(r);
-    } catch { setConfigData(null); }
+      const c = data?.parsed || data?.config || data;
+      setCfg(c);
+      setRouting(c?.bothub?.routing || {});
+    } catch { setCfg(null); }
     setLoading(false);
   }
   useEffect(() => { fetchConfig(); }, []);
 
+  // Build available models for dropdowns
+  function getModelOptions(): { id: string; label: string }[] {
+    const opts: { id: string; label: string }[] = [{ id: "", label: "— Not set —" }];
+    // From config providers
+    const providers = cfg?.models?.providers || {};
+    for (const [pk, pv] of Object.entries(providers)) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const pd = pv as any;
+      if (pd?.models && Array.isArray(pd.models)) {
+        for (const m of pd.models) {
+          opts.push({ id: `${pk}/${m.id}`, label: `${m.name || m.id} (${pk})` });
+        }
+      }
+    }
+    // From known models based on auth profiles
+    for (const profileKey of Object.keys(cfg?.auth?.profiles || {})) {
+      const baseProvider = profileKey.split(":")[0];
+      if (KNOWN_MODELS[baseProvider]) {
+        for (const km of KNOWN_MODELS[baseProvider]) {
+          if (!opts.find(o => o.id === km.id)) {
+            opts.push({ id: km.id, label: `${km.label} (${km.cost})` });
+          }
+        }
+      }
+      // Also add ollama-local known models
+      if (baseProvider === "ollama-local" && KNOWN_MODELS["ollama-local"]) {
+        for (const km of KNOWN_MODELS["ollama-local"]) {
+          if (!opts.find(o => o.id === km.id)) {
+            opts.push({ id: km.id, label: `${km.label} (${km.cost})` });
+          }
+        }
+      }
+    }
+    // Always include the known models for configured providers
+    for (const pk of Object.keys(providers)) {
+      const knownKey = pk.includes("ollama") ? "ollama-local" : pk;
+      if (KNOWN_MODELS[knownKey]) {
+        for (const km of KNOWN_MODELS[knownKey]) {
+          if (!opts.find(o => o.id === km.id)) {
+            opts.push({ id: km.id, label: `${km.label} (${km.cost})` });
+          }
+        }
+      }
+    }
+    return opts;
+  }
+
   async function saveRouting() {
-    if (!configData) return;
+    if (!cfg) return;
     setFeedback("Saving...");
     try {
-      const updated = { ...configData, bothub: { ...((configData as Record<string, unknown>).bothub as Record<string, unknown> || {}), routing } };
+      const updated = { ...cfg, bothub: { ...(cfg.bothub || {}), routing } };
       await invokeTool("gateway", { action: "config.apply", raw: JSON.stringify(updated, null, 2) });
-      setFeedback("✓ Saved");
+      setFeedback("✓ Routing saved");
     } catch (e: unknown) { setFeedback(`Error: ${e}`); }
     setTimeout(() => setFeedback(""), 3000);
   }
+
+  const modelOptions = cfg ? getModelOptions() : [];
 
   return (
     <div className="space-y-6">
@@ -716,16 +946,32 @@ function BotHubPanel() {
 
       <div className="card p-5">
         <h2 className="section-title mb-2">Model Routing</h2>
-        <p className="text-sm text-[var(--text-secondary)] mb-4">Route different task types to different models. e.g. Ollama for chat, Claude for tools, Gemini for fast tasks.</p>
-        <div className="space-y-3">
+        <p className="text-sm text-[var(--text-secondary)] mb-4">Assign models to different task types. Use dropdowns to pick from your configured models, or type a custom model ID.</p>
+        <div className="space-y-4">
           {roles.map((r) => (
-            <div key={r.key} className="flex items-center gap-4">
-              <div className="w-40">
+            <div key={r.key} className="flex items-start gap-4">
+              <div className="w-48 shrink-0">
                 <div className="text-sm font-medium">{r.label}</div>
                 <div className="text-xs text-[var(--text-secondary)]">{r.desc}</div>
+                <div className="text-xs text-[var(--cyan)] mt-1">💡 {r.rec}</div>
               </div>
-              <input className={`${inputCls} flex-1`} placeholder="e.g. anthropic/claude-sonnet-4-20250514, ollama/llama3" value={routing[r.key] || ""}
-                onChange={(e) => setRouting({ ...routing, [r.key]: e.target.value })} />
+              <div className="flex-1 flex gap-2">
+                <select
+                  className={`${selectCls} flex-1`}
+                  value={routing[r.key] || ""}
+                  onChange={(e) => setRouting({ ...routing, [r.key]: e.target.value })}
+                >
+                  {modelOptions.map((o) => (
+                    <option key={o.id} value={o.id}>{o.label}</option>
+                  ))}
+                </select>
+                <input
+                  className={`${inputCls} w-64`}
+                  placeholder="Or type custom model ID..."
+                  value={routing[r.key] || ""}
+                  onChange={(e) => setRouting({ ...routing, [r.key]: e.target.value })}
+                />
+              </div>
             </div>
           ))}
         </div>
@@ -733,10 +979,42 @@ function BotHubPanel() {
       </div>
 
       <div className="card p-5">
-        <h2 className="section-title mb-2">Concept</h2>
+        <h2 className="section-title mb-2">💡 Recommended Setup (Low Cost)</h2>
+        <div className="space-y-2 text-sm">
+          <div className="flex items-center gap-3 py-2 px-3 rounded-lg bg-[var(--bg-primary)]">
+            <span className="w-32 font-medium text-[var(--green)]">💬 Chat</span>
+            <span className="font-mono text-[var(--text-secondary)]">ollama-local/qwen3:8b</span>
+            <span className="text-xs text-[var(--green)] ml-auto">Free — runs locally</span>
+          </div>
+          <div className="flex items-center gap-3 py-2 px-3 rounded-lg bg-[var(--bg-primary)]">
+            <span className="w-32 font-medium text-[var(--yellow)]">🔧 Tools</span>
+            <span className="font-mono text-[var(--text-secondary)]">anthropic/claude-sonnet-4-20250514</span>
+            <span className="text-xs text-[var(--yellow)] ml-auto">$$ — best tool calling</span>
+          </div>
+          <div className="flex items-center gap-3 py-2 px-3 rounded-lg bg-[var(--bg-primary)]">
+            <span className="w-32 font-medium text-[var(--cyan)]">🖼️ Vision</span>
+            <span className="font-mono text-[var(--text-secondary)]">google/gemini-2.5-pro-preview</span>
+            <span className="text-xs text-[var(--cyan)] ml-auto">$$ — great at images</span>
+          </div>
+          <div className="flex items-center gap-3 py-2 px-3 rounded-lg bg-[var(--bg-primary)]">
+            <span className="w-32 font-medium text-[var(--red)]">💻 Code</span>
+            <span className="font-mono text-[var(--text-secondary)]">anthropic/claude-opus-4-6</span>
+            <span className="text-xs text-[var(--red)] ml-auto">$$$ — best at complex code</span>
+          </div>
+          <div className="flex items-center gap-3 py-2 px-3 rounded-lg bg-[var(--bg-primary)]">
+            <span className="w-32 font-medium text-[var(--accent)]">⚡ Fast</span>
+            <span className="font-mono text-[var(--text-secondary)]">google/gemini-3-flash-preview</span>
+            <span className="text-xs text-[var(--accent)] ml-auto">$ — fast and cheap</span>
+          </div>
+        </div>
+      </div>
+
+      <div className="card p-5">
+        <h2 className="section-title mb-2">How It Works</h2>
         <p className="text-sm text-[var(--text-secondary)]">
-          BotHub lets you configure intelligent model routing — send casual chat to a local Ollama model (free, fast),
-          tool-heavy tasks to Claude (best at function calling), and quick lookups to Gemini Flash (fast, cheap).
+          BotHub configures intelligent model routing — your local Ollama model handles casual chat for free,
+          Claude handles tool-heavy tasks (best at function calling), Gemini handles quick lookups (fast and cheap),
+          and Opus tackles complex coding. The primary model can delegate to specialized models as needed.
           This maps to OpenClaw&apos;s model configuration system.
         </p>
       </div>
@@ -754,12 +1032,12 @@ function ConfigPanel({ config, setConfig, loading, onRefresh }: {
   async function saveConfig() {
     setSaving(true); setFeedback("");
     try {
-      JSON.parse(config); // validate
+      JSON.parse(config);
       await invokeTool("gateway", { action: "config.apply", raw: config });
-      setFeedback("✓ Configuration saved successfully");
+      setFeedback("✓ Configuration saved and gateway restarting...");
       onRefresh();
     } catch (e: unknown) {
-      setFeedback(`Error: ${e instanceof SyntaxError ? "Invalid JSON" : e instanceof Error ? e.message : String(e)}`);
+      setFeedback(`Error: ${e instanceof SyntaxError ? "Invalid JSON — check your syntax" : e instanceof Error ? e.message : String(e)}`);
     }
     setSaving(false);
     setTimeout(() => setFeedback(""), 5000);
@@ -774,14 +1052,14 @@ function ConfigPanel({ config, setConfig, loading, onRefresh }: {
             {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />} Save Config
           </button>
           <button onClick={onRefresh} className="btn-secondary flex items-center gap-2">
-            {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+            {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Reset
           </button>
         </div>
       </div>
       {feedback && <div className={`text-sm px-3 py-2 rounded-lg ${feedback.startsWith("✓") ? "bg-[rgba(34,197,94,0.15)] text-[var(--green)]" : "bg-[rgba(239,68,68,0.15)] text-[var(--red)]"}`}>{feedback}</div>}
-      <div className="card p-5">
+      <div className="card p-2">
         <textarea
-          className="w-full min-h-[700px] bg-[var(--bg-primary)] text-[var(--text-primary)] border border-[var(--border)] rounded-lg p-4 font-mono text-xs resize-y focus:outline-none focus:border-[var(--accent)]"
+          className="w-full min-h-[700px] bg-[var(--bg-primary)] text-[var(--text-primary)] border-none rounded-lg p-4 font-mono text-xs resize-y focus:outline-none"
           value={config}
           onChange={(e) => setConfig(e.target.value)}
           spellCheck={false}
@@ -826,7 +1104,7 @@ function MemoryPanel({ memory, loading, onRefresh }: { memory: string; loading?:
             <button onClick={() => setEditing(true)} className="btn-secondary flex items-center gap-2">✏️ Edit</button>
           )}
           <button onClick={onRefresh} className="btn-secondary flex items-center gap-2">
-            {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Refresh
+            {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
           </button>
         </div>
       </div>
