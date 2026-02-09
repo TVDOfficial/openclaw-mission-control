@@ -696,11 +696,11 @@ function ModelsPanel() {
       const data = await invokeTool("gateway", { action: "config.get" });
       setCfg(data?.parsed || data?.config || data);
     } catch { setCfg(null); }
-    // Also fetch live model info from openclaw models command
+    setLoading(false);
+    // Fetch live model info in background (slower, don't block UI)
     try {
       const r = await runExec("openclaw models 2>&1");
       setModelsOutput(r.stdout || r.stderr || "");
-      // Parse auth providers
       const lines = (r.stdout || "").split("\n");
       const provs: { name: string; status: string }[] = [];
       for (const line of lines) {
@@ -709,9 +709,45 @@ function ModelsPanel() {
       }
       setAuthProviders(provs);
     } catch {}
-    setLoading(false);
   }
   useEffect(() => { fetchConfig(); }, []);
+
+  // Build a flat list of all model IDs for dropdowns
+  function getAllModelIds(): string[] {
+    const ids: string[] = [];
+    // From configured models
+    for (const modelId of Object.keys(agentModels)) {
+      if (!ids.includes(modelId)) ids.push(modelId);
+    }
+    // From known models for authenticated providers
+    for (const profileKey of Object.keys(cfg?.auth?.profiles || {})) {
+      const base = profileKey.split(":")[0];
+      if (KNOWN_MODELS[base]) {
+        for (const km of KNOWN_MODELS[base]) {
+          if (!ids.includes(km.id)) ids.push(km.id);
+        }
+      }
+    }
+    // From custom providers
+    for (const [pk, pv] of Object.entries(modelProviders)) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const pd = pv as any;
+      if (pd?.models && Array.isArray(pd.models)) {
+        for (const m of pd.models) {
+          const id = `${pk}/${m.id}`;
+          if (!ids.includes(id)) ids.push(id);
+        }
+      }
+      const knownKey = pk.includes("ollama") ? "ollama-local" : pk;
+      if (KNOWN_MODELS[knownKey]) {
+        for (const km of KNOWN_MODELS[knownKey]) {
+          if (!ids.includes(km.id)) ids.push(km.id);
+        }
+      }
+    }
+    if (primaryModel && !ids.includes(primaryModel)) ids.unshift(primaryModel);
+    return ids;
+  }
 
   const modelProviders = cfg?.models?.providers || {};
   const agentModels = cfg?.agents?.defaults?.models || {};
@@ -739,15 +775,28 @@ function ModelsPanel() {
       </div>
       {feedback && <div className={`text-sm px-3 py-2 rounded-lg ${feedback.startsWith("✓") ? "bg-[rgba(34,197,94,0.15)] text-[var(--green)]" : feedback.startsWith("Error") ? "bg-[rgba(239,68,68,0.15)] text-[var(--red)]" : "text-[var(--text-secondary)]"}`}>{feedback}</div>}
 
-      {/* Primary Model */}
+      {/* Primary Model with setter */}
       <div className="card p-5">
-        <h2 className="section-title mb-4">Primary Model</h2>
-        <div className="flex items-center gap-3">
+        <h2 className="section-title mb-4">Default Model</h2>
+        <div className="flex items-center gap-3 mb-3">
           <BrainCircuit size={24} className="text-[var(--accent)]" />
-          <div>
-            <div className="text-lg font-bold text-[var(--accent)]">{primaryModel}</div>
-            <div className="text-xs text-[var(--text-secondary)]">Default model for all agent sessions</div>
-          </div>
+          <div className="text-lg font-bold text-[var(--accent)]">{primaryModel}</div>
+        </div>
+        <div className="flex gap-2">
+          <select className={`${selectCls} flex-1`} value={primaryModel} onChange={async (e) => {
+            const newModel = e.target.value;
+            if (!cfg || !newModel) return;
+            setFeedback("Saving default model...");
+            try {
+              const updated = { ...cfg, agents: { ...cfg.agents, defaults: { ...cfg.agents?.defaults, model: { ...cfg.agents?.defaults?.model, primary: newModel } } } };
+              await invokeTool("gateway", { action: "config.apply", raw: JSON.stringify(updated, null, 2) });
+              setFeedback("✓ Default model updated — gateway restarting");
+              setTimeout(fetchConfig, 3000);
+            } catch (e: unknown) { setFeedback(`Error: ${e}`); }
+            setTimeout(() => setFeedback(""), 5000);
+          }}>
+            {getAllModelIds().map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
         </div>
       </div>
 
@@ -796,7 +845,8 @@ function ModelsPanel() {
       <div className="card p-5">
         <h2 className="section-title mb-4">Available Models by Provider</h2>
         {Object.entries(KNOWN_MODELS).map(([provider, models]) => {
-          const hasAuth = authProviders.some(p => p.name === provider || p.name.startsWith(provider));
+          const hasAuth = authProviders.some(p => p.name === provider || p.name.startsWith(provider))
+            || Object.keys(cfg?.auth?.profiles || {}).some(k => k === provider || k.startsWith(provider + ":"));
           const hasConfig = !!modelProviders[provider];
           const isAvailable = hasAuth || hasConfig;
           return (
@@ -895,53 +945,6 @@ function BotHubPanel() {
   }
   useEffect(() => { fetchConfig(); }, []);
 
-  // Build available models for dropdowns
-  function getModelOptions(): { id: string; label: string }[] {
-    const opts: { id: string; label: string }[] = [{ id: "", label: "— Not set —" }];
-    // From config providers
-    const providers = cfg?.models?.providers || {};
-    for (const [pk, pv] of Object.entries(providers)) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const pd = pv as any;
-      if (pd?.models && Array.isArray(pd.models)) {
-        for (const m of pd.models) {
-          opts.push({ id: `${pk}/${m.id}`, label: `${m.name || m.id} (${pk})` });
-        }
-      }
-    }
-    // From known models based on auth profiles
-    for (const profileKey of Object.keys(cfg?.auth?.profiles || {})) {
-      const baseProvider = profileKey.split(":")[0];
-      if (KNOWN_MODELS[baseProvider]) {
-        for (const km of KNOWN_MODELS[baseProvider]) {
-          if (!opts.find(o => o.id === km.id)) {
-            opts.push({ id: km.id, label: `${km.label} (${km.cost})` });
-          }
-        }
-      }
-      // Also add ollama-local known models
-      if (baseProvider === "ollama-local" && KNOWN_MODELS["ollama-local"]) {
-        for (const km of KNOWN_MODELS["ollama-local"]) {
-          if (!opts.find(o => o.id === km.id)) {
-            opts.push({ id: km.id, label: `${km.label} (${km.cost})` });
-          }
-        }
-      }
-    }
-    // Always include the known models for configured providers
-    for (const pk of Object.keys(providers)) {
-      const knownKey = pk.includes("ollama") ? "ollama-local" : pk;
-      if (KNOWN_MODELS[knownKey]) {
-        for (const km of KNOWN_MODELS[knownKey]) {
-          if (!opts.find(o => o.id === km.id)) {
-            opts.push({ id: km.id, label: `${km.label} (${km.cost})` });
-          }
-        }
-      }
-    }
-    return opts;
-  }
-
   async function saveRouting() {
     if (!cfg) return;
     setFeedback("Saving...");
@@ -953,7 +956,52 @@ function BotHubPanel() {
     setTimeout(() => setFeedback(""), 3000);
   }
 
-  const modelOptions = cfg ? getModelOptions() : [];
+  // Build model options - include all known models for authenticated providers
+  function getAllOptions(): { id: string; label: string }[] {
+    if (!cfg) return [{ id: "", label: "Loading..." }];
+    const opts: { id: string; label: string }[] = [{ id: "", label: "— Not set —" }];
+    // From auth profiles → known models
+    for (const profileKey of Object.keys(cfg?.auth?.profiles || {})) {
+      const base = profileKey.split(":")[0];
+      if (KNOWN_MODELS[base]) {
+        for (const km of KNOWN_MODELS[base]) {
+          if (!opts.find(o => o.id === km.id)) {
+            opts.push({ id: km.id, label: `${km.label} (${km.cost})` });
+          }
+        }
+      }
+    }
+    // From config providers
+    const providers = cfg?.models?.providers || {};
+    for (const [pk, pv] of Object.entries(providers)) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const pd = pv as any;
+      if (pd?.models && Array.isArray(pd.models)) {
+        for (const m of pd.models) {
+          const id = `${pk}/${m.id}`;
+          if (!opts.find(o => o.id === id)) {
+            opts.push({ id, label: `${m.name || m.id} (${pk})` });
+          }
+        }
+      }
+      const knownKey = pk.includes("ollama") ? "ollama-local" : pk;
+      if (KNOWN_MODELS[knownKey]) {
+        for (const km of KNOWN_MODELS[knownKey]) {
+          if (!opts.find(o => o.id === km.id)) {
+            opts.push({ id: km.id, label: `${km.label} (${km.cost})` });
+          }
+        }
+      }
+    }
+    // From configured agent models
+    for (const modelId of Object.keys(cfg?.agents?.defaults?.models || {})) {
+      if (!opts.find(o => o.id === modelId)) {
+        opts.push({ id: modelId, label: modelId });
+      }
+    }
+    return opts;
+  }
+  const modelOptions = getAllOptions();
 
   return (
     <div className="space-y-6">
