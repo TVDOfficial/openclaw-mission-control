@@ -322,6 +322,12 @@ function SessionsPanel({ sessions, loading, onRefresh }: { sessions: Session[]; 
     if (sendTarget === selected) loadHistory(selected);
   }
 
+  async function killSession(key: string) {
+    if (!confirm(`End session "${key}"? This will reset it.`)) return;
+    await invokeTool("sessions_send", { sessionKey: key, message: "/reset" });
+    onRefresh();
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -356,7 +362,12 @@ function SessionsPanel({ sessions, loading, onRefresh }: { sessions: Session[]; 
                   {s.totalTokens ? <span> · {(s.totalTokens / 1000).toFixed(1)}k tok</span> : null}
                 </div>
               </div>
-              <span className="text-xs text-[var(--text-secondary)]">{ago(s.updatedAt)}</span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-[var(--text-secondary)]">{ago(s.updatedAt)}</span>
+                <button onClick={(e) => { e.stopPropagation(); killSession(s.key); }} className="btn-danger text-xs py-0.5 px-1.5 flex items-center gap-1" title="End session">
+                  <X size={10} />
+                </button>
+              </div>
             </button>
           ))}
         </div>
@@ -676,6 +687,8 @@ function ModelsPanel() {
   const [feedback, setFeedback] = useState("");
   const [newApiKey, setNewApiKey] = useState("");
   const [newProvider, setNewProvider] = useState("anthropic");
+  const [modelsOutput, setModelsOutput] = useState("");
+  const [authProviders, setAuthProviders] = useState<{ name: string; status: string }[]>([]);
 
   async function fetchConfig() {
     setLoading(true);
@@ -683,6 +696,19 @@ function ModelsPanel() {
       const data = await invokeTool("gateway", { action: "config.get" });
       setCfg(data?.parsed || data?.config || data);
     } catch { setCfg(null); }
+    // Also fetch live model info from openclaw models command
+    try {
+      const r = await runExec("openclaw models 2>&1");
+      setModelsOutput(r.stdout || r.stderr || "");
+      // Parse auth providers
+      const lines = (r.stdout || "").split("\n");
+      const provs: { name: string; status: string }[] = [];
+      for (const line of lines) {
+        const m = line.match(/^- (\S+)\s+effective=(.+)/);
+        if (m) provs.push({ name: m[1], status: m[2] });
+      }
+      setAuthProviders(provs);
+    } catch {}
     setLoading(false);
   }
   useEffect(() => { fetchConfig(); }, []);
@@ -691,49 +717,12 @@ function ModelsPanel() {
   const agentModels = cfg?.agents?.defaults?.models || {};
   const primaryModel = cfg?.agents?.defaults?.model?.primary || "Not set";
 
-  // Build list of all available models from configured providers
-  function getAvailableModels(): { id: string; label: string; cost: string; best: string; provider: string }[] {
-    const models: { id: string; label: string; cost: string; best: string; provider: string }[] = [];
-    // Add models from config providers
-    for (const [providerKey, providerData] of Object.entries(modelProviders)) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const pd = providerData as any;
-      if (pd?.models && Array.isArray(pd.models)) {
-        for (const m of pd.models) {
-          models.push({ id: `${providerKey}/${m.id}`, label: m.name || m.id, cost: "Local", best: "Local model", provider: providerKey });
-        }
-      }
-      // Also add known models for this provider type
-      const knownKey = providerKey.includes("ollama") ? "ollama-local" : providerKey;
-      if (KNOWN_MODELS[knownKey]) {
-        for (const km of KNOWN_MODELS[knownKey]) {
-          if (!models.find(m => m.id === km.id)) {
-            models.push({ ...km, provider: providerKey });
-          }
-        }
-      }
-    }
-    // Add known models for auth profiles (anthropic, google)
-    for (const profileKey of Object.keys(cfg?.auth?.profiles || {})) {
-      const baseProvider = profileKey.split(":")[0];
-      if (KNOWN_MODELS[baseProvider]) {
-        for (const km of KNOWN_MODELS[baseProvider]) {
-          if (!models.find(m => m.id === km.id)) {
-            models.push({ ...km, provider: baseProvider });
-          }
-        }
-      }
-    }
-    return models;
-  }
-
   async function setApiKeyEnv() {
     if (!newApiKey.trim()) return;
     setFeedback("Setting API key...");
     try {
-      const envVar = newProvider === "anthropic" ? "ANTHROPIC_API_KEY" : newProvider === "google" ? "GOOGLE_API_KEY" : "OLLAMA_API_KEY";
-      // Write to .env in OpenClaw credentials
-      const r = await runExec(`echo "export ${envVar}=${newApiKey}" >> ~/.bashrc && echo "Set ${envVar}"`);
+      const envVar = newProvider === "anthropic" ? "ANTHROPIC_API_KEY" : newProvider === "google" ? "GOOGLE_API_KEY" : newProvider === "openrouter" ? "OPENROUTER_API_KEY" : "OLLAMA_API_KEY";
+      const r = await runExec(`echo "export ${envVar}='${newApiKey}'" >> ~/.bashrc && echo "Set ${envVar}"`);
       setFeedback(`✓ ${r.stdout.trim() || "API key set"} — restart OpenClaw to apply`);
       setNewApiKey("");
     } catch (e: unknown) { setFeedback(`Error: ${e}`); }
@@ -757,12 +746,12 @@ function ModelsPanel() {
           <BrainCircuit size={24} className="text-[var(--accent)]" />
           <div>
             <div className="text-lg font-bold text-[var(--accent)]">{primaryModel}</div>
-            <div className="text-xs text-[var(--text-secondary)]">Set in agents.defaults.model.primary — edit in Configuration tab</div>
+            <div className="text-xs text-[var(--text-secondary)]">Default model for all agent sessions</div>
           </div>
         </div>
       </div>
 
-      {/* Configured Model Aliases */}
+      {/* Configured Models & Aliases */}
       <div className="card p-5">
         <h2 className="section-title mb-4">Configured Models & Aliases</h2>
         <div className="space-y-2">
@@ -783,18 +772,43 @@ function ModelsPanel() {
         </div>
       </div>
 
-      {/* Available Models by Provider */}
+      {/* Auth Providers (from openclaw models) */}
       <div className="card p-5">
-        <h2 className="section-title mb-4">Available Models</h2>
-        {(() => {
-          const allModels = getAvailableModels();
-          const providers = [...new Set(allModels.map(m => m.provider))];
-          return providers.map(p => (
-            <div key={p} className="mb-4">
-              <h3 className="text-sm font-semibold mb-2 text-[var(--accent)]">{p}</h3>
+        <h2 className="section-title mb-4">Authenticated Providers</h2>
+        {authProviders.length > 0 ? (
+          <div className="space-y-2">
+            {authProviders.map((p) => (
+              <div key={p.name} className="flex items-center justify-between py-2 px-3 rounded-lg bg-[var(--bg-primary)] border border-[var(--border)]">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 size={16} className="text-[var(--green)]" />
+                  <span className="font-semibold text-sm">{p.name}</span>
+                </div>
+                <span className="text-xs text-[var(--text-secondary)] font-mono truncate max-w-md">{p.status}</span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-sm text-[var(--text-secondary)]">Loading providers...</p>
+        )}
+      </div>
+
+      {/* Available Models (known per provider) */}
+      <div className="card p-5">
+        <h2 className="section-title mb-4">Available Models by Provider</h2>
+        {Object.entries(KNOWN_MODELS).map(([provider, models]) => {
+          const hasAuth = authProviders.some(p => p.name === provider || p.name.startsWith(provider));
+          const hasConfig = !!modelProviders[provider];
+          const isAvailable = hasAuth || hasConfig;
+          return (
+            <div key={provider} className="mb-4">
+              <h3 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                <span className={isAvailable ? "text-[var(--accent)]" : "text-[var(--text-secondary)]"}>{provider}</span>
+                {isAvailable ? <CheckCircle2 size={14} className="text-[var(--green)]" /> : <AlertCircle size={14} className="text-[var(--text-secondary)]" />}
+                {!isAvailable && <span className="text-xs text-[var(--text-secondary)]">(no API key set)</span>}
+              </h3>
               <div className="space-y-1">
-                {allModels.filter(m => m.provider === p).map(m => (
-                  <div key={m.id} className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-[var(--bg-card-hover)]">
+                {models.map((m) => (
+                  <div key={m.id} className={`flex items-center justify-between py-2 px-3 rounded-lg ${isAvailable ? "hover:bg-[var(--bg-card-hover)]" : "opacity-50"}`}>
                     <div>
                       <span className="font-mono text-sm">{m.label}</span>
                       <span className="text-xs text-[var(--text-secondary)] ml-2">{m.id}</span>
@@ -807,18 +821,19 @@ function ModelsPanel() {
                 ))}
               </div>
             </div>
-          ));
-        })()}
+          );
+        })}
       </div>
 
       {/* API Keys */}
       <div className="card p-5">
         <h2 className="section-title mb-4 flex items-center gap-2"><Key size={14} /> API Keys</h2>
-        <p className="text-sm text-[var(--text-secondary)] mb-3">Set API keys for model providers. Keys are stored as environment variables.</p>
+        <p className="text-sm text-[var(--text-secondary)] mb-3">Set API keys for model providers. Stored as environment variables in ~/.bashrc.</p>
         <div className="flex gap-2">
-          <select className={`${selectCls} w-40`} value={newProvider} onChange={(e) => setNewProvider(e.target.value)}>
+          <select className={`${selectCls} w-44`} value={newProvider} onChange={(e) => setNewProvider(e.target.value)}>
             <option value="anthropic">Anthropic</option>
             <option value="google">Google</option>
+            <option value="openrouter">OpenRouter</option>
             <option value="ollama">Ollama (local)</option>
           </select>
           <input className={`${inputCls} flex-1`} type="password" placeholder="API key..." value={newApiKey} onChange={(e) => setNewApiKey(e.target.value)} />
@@ -826,9 +841,9 @@ function ModelsPanel() {
         </div>
       </div>
 
-      {/* Providers Config */}
+      {/* Custom Providers from Config */}
       <div className="card p-5">
-        <h2 className="section-title mb-4">Model Providers (from config)</h2>
+        <h2 className="section-title mb-4">Custom Model Providers (from config)</h2>
         {Object.keys(modelProviders).length > 0 ? (
           <div className="space-y-3">
             {Object.entries(modelProviders).map(([k, v]) => (
@@ -839,8 +854,14 @@ function ModelsPanel() {
             ))}
           </div>
         ) : (
-          <p className="text-[var(--text-secondary)] text-sm">No custom model providers configured. Using default provider endpoints.</p>
+          <p className="text-[var(--text-secondary)] text-sm">No custom model providers. Using default endpoints.</p>
         )}
+      </div>
+
+      {/* Raw openclaw models output */}
+      <div className="card p-5">
+        <h2 className="section-title mb-4">Raw Model Info (openclaw models)</h2>
+        <pre className="text-xs font-mono text-[var(--text-secondary)] bg-[var(--bg-primary)] p-3 rounded-lg overflow-auto max-h-60 whitespace-pre-wrap">{modelsOutput || "Loading..."}</pre>
       </div>
     </div>
   );
