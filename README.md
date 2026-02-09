@@ -1,68 +1,91 @@
 # OpenClaw Mission Control 🛰️
 
-A sleek, dark-themed web dashboard for managing your [OpenClaw](https://github.com/nicholasgriffintn/openclaw) AI agent gateway. Built with Next.js 15, React 19, and Tailwind CSS v4.
+[![Next.js](https://img.shields.io/badge/Next.js-15-000000?style=flat-square&logo=next.js)](https://nextjs.org/)
+[![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react)](https://react.dev/)
+[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v4-06B6D4?style=flat-square&logo=tailwind-css)](https://tailwindcss.com/)
+[![License](https://img.shields.io/badge/License-MIT-6366f1?style=flat-square)](LICENSE)
+
+A sleek, dark-themed web dashboard for managing your [OpenClaw](https://github.com/openclaw/openclaw) AI agent gateway. Built with Next.js 15, React 19, and Tailwind CSS v4.
 
 ![Mission Control](https://img.shields.io/badge/OpenClaw-Mission%20Control-6366f1?style=for-the-badge)
 
-## Screenshots
-
-> *Screenshots coming soon*
-
-## Features
+## ✨ Features
 
 ### 📊 Dashboard
-- Real-time gateway status (online/offline)
-- Active and total session counts
-- Current model display
-- One-click OpenClaw updates
-- Recent sessions with token usage
+- Real-time gateway status with online/offline indicators
+- Active and total session counts with token usage
+- Current model display and quick model switching
+- One-click OpenClaw updates and gateway restart
+- Recent sessions with activity timestamps
 
 ### 💻 Sessions
-- List all sessions with status indicators, model info, and token counts
+- List all active sessions with status indicators
+- View session details: model, channel, token usage
 - Click any session to view message history
 - Send messages to any session directly
+- Kill/reset sessions on demand
 
 ### 🤖 Agents & Sub-Bots
-- View all configured agents
-- Spawn new sub-agents with custom task, label, and model
+- View all configured agents and their status
+- **Active Sub-Agents panel** — CodeMaster, ResearchBot, CreativeWriter, TaskPlanner
+- Spawn new sub-agents with custom tasks, labels, and models
+- Chat directly with sub-agents from the dashboard
+- Bot Builder Chat — AI-assisted bot creation
 
 ### ⏰ Cron Jobs
-- List all cron jobs with status, schedule, last/next run times
-- Create new jobs (cron expressions, intervals, or one-shot)
-- Enable/disable, run on demand, or delete jobs
+- List all scheduled jobs with status and timing
+- Create jobs with cron expressions, intervals, or one-shot triggers
+- Enable/disable jobs on demand
+- Run jobs manually
+- View last run status and next scheduled run
 
 ### 📦 Skills
 - List all installed skills (workspace + global)
-- Install new skills via ClewHub
-- Check for skill updates
+- Install new skills via ClawHub
+- Check for available skill updates
 
 ### 🧩 Models
-- View model configuration and providers
-- See configured models with aliases
-- Quick config reload
+- View all configured models and providers
+- See authenticated provider status
+- Quick primary model switching
+- View model aliases and shortcuts
+- Add API keys for providers
 
-### 🌐 BotHub
-- Intelligent model routing configuration
-- Assign different models to different task types (Chat, Tools, Vision, Code, Fast)
-- Save routing preferences to gateway config
+### 🌐 BotHub (Model Routing)
+- Intelligent model routing by task type
+- Assign models to: Chat, Tools, Image, Code, Fast tasks
+- **Task Router** — Auto-detects task type and routes to appropriate model
+- Local storage persistence for routing preferences
+- Spawns sub-agents with routed models
 
 ### ⚙️ Configuration
-- Full JSON config editor with monospace textarea
-- Native keyboard shortcuts (Ctrl+A, Ctrl+C, Ctrl+V)
-- Save with validation, reset from server
-- Success/error toast feedback
+- Full JSON config editor with syntax validation
+- Live config reload without restart
+- Success/error feedback
+- View gateway status and connection details
 
 ### 🧠 Memory
-- View MEMORY.md contents
-- Toggle editable mode to modify and save
+- View and edit MEMORY.md contents
+- Persistent storage of important context
 
-## Prerequisites
+## 📱 Mobile Support
+
+Mission Control is fully optimized for mobile devices:
+- **Responsive design** — Adapts to any screen size
+- **Touch-friendly** — 44px minimum touch targets
+- **Hamburger menu** — Easy navigation on small screens
+- **No zoom on input** — iOS-friendly form fields
+- **Slide-out sidebar** — Full-screen navigation overlay
+
+## 🚀 Quick Start
+
+### Prerequisites
 
 - **Node.js** v20+ (v25 recommended)
 - **OpenClaw** gateway running locally
 - **npm** or compatible package manager
 
-## Installation
+### Installation
 
 ```bash
 # Clone the repository
@@ -77,22 +100,33 @@ cp .env.local.example .env.local
 # Edit .env.local with your gateway URL and token:
 #   OPENCLAW_GATEWAY_URL=http://127.0.0.1:18789
 #   OPENCLAW_GATEWAY_TOKEN=your-token-here
+```
 
-# Build for production
+### Running
+
+**Development mode:**
+```bash
+npm run dev
+```
+
+**Production mode:**
+```bash
 npm run build
-
-# Start the server
 node server.mjs
 ```
 
 The dashboard will be available at **http://localhost:3333**
 
-### WSL2 Users — Access from Other Devices
+## 🔧 WSL2 Network Access
 
-If you're running Mission Control inside WSL2 and want to access it from other devices on your network (phone, tablet, etc.), WSL2's virtual network is isolated from your LAN. You need to port forward from Windows to WSL2:
+If running inside WSL2 and want access from other devices on your network:
 
-**Run in Windows PowerShell as Administrator:**
+### 1. Find your WSL2 IP
+```bash
+ip addr show eth0 | grep "inet " | awk '{print $2}' | cut -d/ -f1
+```
 
+### 2. Port forward on Windows (PowerShell as Admin)
 ```powershell
 # Port forward from Windows host to WSL2
 netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=3333 connectaddress=<WSL2_IP> connectport=3333
@@ -101,46 +135,85 @@ netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=3333 conne
 netsh advfirewall firewall add rule name="OpenClaw Mission Control" dir=in action=allow protocol=tcp localport=3333
 ```
 
-Replace `<WSL2_IP>` with your WSL2 instance IP (find it with `ip addr show eth0` in WSL).
-
-**To verify:**
+### 3. Verify
 ```powershell
 netsh interface portproxy show all
 ```
 
-Then access via `http://<Windows_IP>:3333` from any device on your network.
+### 4. Access
+From any device on your network: `http://<Windows_IP>:3333`
 
-## Development
-
-```bash
-npm run dev
+### Remove port forwarding (if needed)
+```powershell
+netsh interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=3333
+netsh advfirewall firewall delete rule name="OpenClaw Mission Control"
 ```
 
-Runs on port 3333 in dev mode with hot reload.
+## 🔐 Environment Variables
 
-## Environment Variables
+| Variable | Description | Default | Required |
+|----------|-------------|---------|----------|
+| `OPENCLAW_GATEWAY_URL` | OpenClaw gateway URL | `http://127.0.0.1:18789` | No |
+| `OPENCLAW_GATEWAY_TOKEN` | Gateway authentication token | — | Yes |
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `OPENCLAW_GATEWAY_URL` | OpenClaw gateway URL | `http://127.0.0.1:18789` |
-| `OPENCLAW_GATEWAY_TOKEN` | Gateway authentication token | — |
+> ⚠️ **Security Note:** Never commit `.env.local` with real credentials to version control.
 
-## API Routes
+## 📡 API Routes
 
 | Route | Method | Description |
 |-------|--------|-------------|
-| `/api/openclaw` | GET/POST | Proxy to OpenClaw gateway tools/invoke |
-| `/api/file` | GET/POST | Read/write files via Node.js fs |
+| `/api/openclaw` | GET | Gateway health check |
+| `/api/openclaw` | POST | Proxy to OpenClaw gateway tools/invoke |
+| `/api/file` | GET | Read files via Node.js fs |
+| `/api/file` | POST | Write files via Node.js fs |
 | `/api/exec` | POST | Execute shell commands |
 
-## Tech Stack
+## 🛠️ Tech Stack
 
-- **Next.js 15** — App Router, React Server Components
-- **React 19** — Latest React with concurrent features
-- **Tailwind CSS v4** — Utility-first CSS
-- **Lucide React** — Beautiful, consistent icons
+- **[Next.js 15](https://nextjs.org/)** — App Router, React Server Components
+- **[React 19](https://react.dev/)** — Latest React with concurrent features
+- **[Tailwind CSS v4](https://tailwindcss.com/)** — Utility-first CSS
+- **[Lucide React](https://lucide.dev/)** — Beautiful, consistent icons
 - **Custom server** (`server.mjs`) — Production HTTP server with env loading
 
-## License
+## 🎨 Customization
 
-MIT
+### Theme
+The dark theme uses CSS variables defined in `globals.css`:
+```css
+--bg-primary: #0a0a0f
+--bg-secondary: #12121a
+--accent: #6366f1
+--text-primary: #e4e4ef
+```
+
+### Adding New Features
+The dashboard is modular — each panel is a separate component in `src/app/page.tsx`:
+- `DashboardPanel` — Overview and stats
+- `SessionsPanel` — Session management
+- `AgentsPanel` — Sub-agent spawning and chat
+- `BotHubPanel` — Model routing and task router
+- etc.
+
+## 🤝 Sub-Agents
+
+Mission Control includes 4 pre-configured sub-agents:
+
+| Agent | Purpose | Model |
+|-------|---------|-------|
+| **CodeMaster** 💻 | Coding, debugging, code review | Claude Opus 4 |
+| **ResearchBot** 🔍 | Research, summaries, fact-checking | Gemini 2.5 Pro |
+| **CreativeWriter** ✍️ | Stories, copy, creative content | Claude Sonnet 4 |
+| **TaskPlanner** 📋 | Project planning, task breakdown | Gemini 3 Flash |
+
+Use the Task Router in BotHub to automatically delegate tasks to the right agent, or chat with them directly from the Agents panel.
+
+## 📝 License
+
+MIT © [Mathew Pittard](https://github.com/TVDOfficial)
+
+---
+
+<p align="center">
+  Built with 🦞 for the OpenClaw ecosystem
+</p>
