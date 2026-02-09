@@ -6,7 +6,8 @@ import {
   Activity, Bot, Clock, Cpu, Zap, Terminal, Settings, BrainCircuit,
   Play, Trash2, RefreshCw, Plus, Send, ChevronDown, ChevronRight,
   Circle, AlertCircle, CheckCircle2, Loader2, Satellite, LayoutDashboard,
-  Package, Layers, Network, Download, Save, X, MessageSquare, Key
+  Package, Layers, Network, Download, Save, X, MessageSquare, Key,
+  Menu
 } from "lucide-react";
 
 /* ─── Types ─── */
@@ -60,6 +61,12 @@ const KNOWN_MODELS: Record<string, { id: string; label: string; cost: string; be
     { id: "ollama-local/codellama:13b", label: "Code Llama 13B", cost: "Free", best: "Coding" },
     { id: "ollama-local/deepseek-coder-v2:16b", label: "DeepSeek Coder V2", cost: "Free", best: "Coding" },
   ],
+  moonshot: [
+    { id: "moonshot/kimi-k2.5", label: "Kimi K2.5", cost: "$$", best: "General, long context" },
+  ],
+  "kimi-coding": [
+    { id: "kimi-coding/k2p5", label: "Kimi K2.5 Coding", cost: "$$", best: "Coding, technical tasks" },
+  ],
 };
 
 /* ─── Helpers ─── */
@@ -95,6 +102,7 @@ export default function MissionControl() {
   const [memory, setMemory] = useState<string>("");
   const [loading, setLoading] = useState<Record<string, boolean>>({});
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const setL = (key: string, val: boolean) => setLoading((p) => ({ ...p, [key]: val }));
 
@@ -165,23 +173,50 @@ export default function MissionControl() {
 
   return (
     <div className="flex h-screen overflow-hidden">
-      <aside className={`flex flex-col border-r border-[var(--border)] bg-[var(--bg-secondary)] transition-all ${sidebarCollapsed ? "w-16" : "w-56"}`}>
+      {/* Mobile Sidebar Overlay */}
+      {mobileMenuOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-40 md:hidden" 
+          onClick={() => setMobileMenuOpen(false)}
+        />
+      )}
+
+      {/* Sidebar - Desktop: always visible, Mobile: slide-in overlay */}
+      <aside className={`
+        flex flex-col border-r border-[var(--border)] bg-[var(--bg-secondary)] transition-all
+        fixed md:relative z-50 h-full
+        ${sidebarCollapsed ? "w-16" : "w-56"}
+        ${mobileMenuOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}
+      `}>
         <div className="flex items-center gap-2 p-4 border-b border-[var(--border)]">
           <Satellite size={24} className="text-[var(--accent)] shrink-0" />
           {!sidebarCollapsed && <span className="font-bold text-sm tracking-wide">MISSION CONTROL</span>}
-          <button onClick={() => setSidebarCollapsed(!sidebarCollapsed)} className="ml-auto text-[var(--text-secondary)] hover:text-[var(--text-primary)]">
+          <button 
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)} 
+            className="ml-auto text-[var(--text-secondary)] hover:text-[var(--text-primary)] hidden md:block"
+          >
             {sidebarCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+          </button>
+          {/* Close button for mobile */}
+          <button 
+            onClick={() => setMobileMenuOpen(false)} 
+            className="ml-auto text-[var(--text-secondary)] hover:text-[var(--text-primary)] md:hidden"
+          >
+            <X size={20} />
           </button>
         </div>
         <nav className="flex-1 py-2 overflow-y-auto">
           {TABS.map(({ id, label, icon: Icon }) => (
-            <button key={id} onClick={() => setTab(id)}
-              className={`flex items-center gap-3 w-full px-4 py-2.5 text-sm transition-all ${
+            <button 
+              key={id} 
+              onClick={() => { setTab(id); setMobileMenuOpen(false); }}
+              className={`flex items-center gap-3 w-full px-4 py-3 md:py-2.5 text-sm transition-all touch-manipulation ${
                 tab === id ? "text-[var(--accent)] bg-[rgba(99,102,241,0.1)] border-r-2 border-[var(--accent)]"
                   : "text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--bg-card)]"
-              }`}>
-              <Icon size={18} />
-              {!sidebarCollapsed && label}
+              }`}
+            >
+              <Icon size={20} className="shrink-0" />
+              {!sidebarCollapsed && <span className="truncate">{label}</span>}
             </button>
           ))}
         </nav>
@@ -193,7 +228,22 @@ export default function MissionControl() {
         </div>
       </aside>
 
-      <main className="flex-1 overflow-y-auto p-6">
+      {/* Main Content */}
+      <main className="flex-1 overflow-y-auto p-3 md:p-6 w-full">
+        {/* Mobile Header */}
+        <div className="flex items-center gap-3 mb-4 md:hidden">
+          <button 
+            onClick={() => setMobileMenuOpen(true)}
+            className="p-2 rounded-lg bg-[var(--bg-card)] border border-[var(--border)]"
+          >
+            <Menu size={20} />
+          </button>
+          <span className="font-bold text-sm">MISSION CONTROL</span>
+          <div className="ml-auto">
+            <StatusDot ok={!!isOnline} />
+          </div>
+        </div>
+
         {tab === "dashboard" && <DashboardPanel health={health} sessions={sessions} isOnline={!!isOnline} loading={loading.health} onRefresh={() => { fetchHealth(); fetchSessions(); }} />}
         {tab === "sessions" && <SessionsPanel sessions={sessions} loading={loading.sessions} onRefresh={fetchSessions} />}
         {tab === "agents" && <AgentsPanel agents={agents} loading={loading.agents} onRefresh={fetchAgents} />}
@@ -233,19 +283,38 @@ function DashboardPanel({ health, sessions, isOnline, loading, onRefresh }: {
     setUpdating(false);
   }
 
+  async function restartGateway() {
+    if (!confirm("Restart the OpenClaw gateway? This will disconnect all active sessions temporarily.")) return;
+    try {
+      await invokeTool("gateway", { action: "restart" });
+      alert("Gateway restart command sent.");
+    } catch (e: unknown) { alert("Error: " + e); }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold flex items-center gap-3"><Activity className="text-[var(--accent)]" /> Dashboard</h1>
-        <button onClick={onRefresh} className="btn-secondary flex items-center gap-2">
-          {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Refresh
-        </button>
+        <div className="flex gap-2">
+          <button onClick={restartGateway} className="btn-danger flex items-center gap-2">
+            <RefreshCw size={14} /> Restart Gateway
+          </button>
+          <button onClick={onRefresh} className="btn-secondary flex items-center gap-2">
+            {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Refresh
+          </button>
+        </div>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard label="Gateway" value={isOnline ? "ONLINE" : "OFFLINE"} icon={<Zap size={20} />} color={isOnline ? "var(--green)" : "var(--red)"} />
         <MetricCard label="Active Sessions" value={String(activeSessions.length)} icon={<Terminal size={20} />} color="var(--cyan)" />
         <MetricCard label="Total Sessions" value={String(sessions.length)} icon={<Cpu size={20} />} color="var(--accent)" />
-        <MetricCard label="Model" value="Opus 4" icon={<BrainCircuit size={20} />} color="var(--orange)" sub="claude-opus-4-6" />
+        <MetricCard 
+          label="Default Model" 
+          value={(health as any)?.config?.agents?.defaults?.model?.primary?.split('/')?.pop() || "Gemini 3"} 
+          icon={<BrainCircuit size={20} />} 
+          color="var(--orange)" 
+          sub={(health as any)?.config?.agents?.defaults?.model?.primary || "google/gemini-3-flash-preview"} 
+        />
       </div>
       <div className="card p-5">
         <h2 className="section-title mb-4 flex items-center gap-2"><Download size={14} /> OpenClaw Updates</h2>
@@ -398,6 +467,68 @@ function AgentsPanel({ agents, loading, onRefresh }: { agents: Agent[]; loading?
   const [chatInput, setChatInput] = useState("");
   const [chatSession, setChatSession] = useState<string | null>(null);
   const [chatLoading, setChatLoading] = useState(false);
+  // Sub-agents (sessions with labels)
+  const [subAgents, setSubAgents] = useState<Session[]>([]);
+  const [subAgentsLoading, setSubAgentsLoading] = useState(false);
+  const [selectedSubAgent, setSelectedSubAgent] = useState<Session | null>(null);
+  const [subAgentMsg, setSubAgentMsg] = useState("");
+  const [subAgentMsgs, setSubAgentMsgs] = useState<{role: string, content: string}[]>([]);
+  const [subAgentSending, setSubAgentSending] = useState(false);
+
+  async function fetchSubAgents() {
+    setSubAgentsLoading(true);
+    try {
+      const data = await invokeTool("sessions_list", { limit: 50 });
+      const sessions = Array.isArray(data?.sessions) ? data.sessions : [];
+      // Filter for sub-agents (sessions with labels like CodeMaster, ResearchBot, etc.)
+      const labeled = sessions.filter((s: Session) => 
+        s.label && (
+          s.label.includes("CodeMaster") ||
+          s.label.includes("ResearchBot") ||
+          s.label.includes("CreativeWriter") ||
+          s.label.includes("TaskPlanner") ||
+          s.label.includes("BotHub-")
+        )
+      );
+      setSubAgents(labeled);
+    } catch { setSubAgents([]); }
+    setSubAgentsLoading(false);
+  }
+
+  useEffect(() => { fetchSubAgents(); }, []);
+
+  async function sendToSubAgent() {
+    if (!subAgentMsg.trim() || !selectedSubAgent) return;
+    const msg = subAgentMsg;
+    setSubAgentMsg("");
+    setSubAgentMsgs(prev => [...prev, { role: "user", content: msg }]);
+    setSubAgentSending(true);
+    try {
+      await invokeTool("sessions_send", { sessionKey: selectedSubAgent.key, message: msg });
+      // Poll for response
+      let attempts = 0;
+      const checkResponse = async () => {
+        if (attempts > 20) { setSubAgentSending(false); return; }
+        attempts++;
+        try {
+          const history = await invokeTool("sessions_history", { sessionKey: selectedSubAgent.key, limit: 5 });
+          const assistantMsgs = history?.messages?.filter((m: {role: string}) => m.role === "assistant") || [];
+          if (assistantMsgs.length > 0) {
+            const lastMsg = assistantMsgs[assistantMsgs.length - 1];
+            const content = typeof lastMsg.content === "string" ? lastMsg.content : JSON.stringify(lastMsg.content);
+            setSubAgentMsgs(prev => [...prev, { role: "assistant", content }]);
+            setSubAgentSending(false);
+          } else {
+            setTimeout(checkResponse, 1000);
+          }
+        } catch { setTimeout(checkResponse, 1000); }
+      };
+      setTimeout(checkResponse, 1500);
+    } catch {
+      setSubAgentMsgs(prev => [...prev, { role: "system", content: "Failed to send message" }]);
+      setSubAgentSending(false);
+    }
+  }
 
   async function spawnAgent() {
     if (!task.trim()) return;
@@ -487,6 +618,81 @@ function AgentsPanel({ agents, loading, onRefresh }: { agents: Agent[]; loading?
                 onChange={(e) => setChatInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && sendChatMsg()} />
               <button onClick={sendChatMsg} disabled={chatLoading} className="btn-primary flex items-center gap-2"><Send size={14} /></button>
               <button onClick={() => { setChatMsgs([]); setChatSession(null); }} className="btn-secondary flex items-center gap-2"><X size={14} /></button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Active Sub-Agents */}
+      <div className="card p-5 glow-border">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="section-title flex items-center gap-2"><Bot size={14} /> Active Sub-Agents</h2>
+          <button onClick={fetchSubAgents} className="btn-secondary text-xs flex items-center gap-1">
+            {subAgentsLoading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} Refresh
+          </button>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          {subAgents.map((s) => (
+            <div 
+              key={s.key} 
+              className={`card p-4 cursor-pointer transition-all ${selectedSubAgent?.key === s.key ? 'border-[var(--accent)] ring-1 ring-[var(--accent)]' : ''}`}
+              onClick={() => { setSelectedSubAgent(s); setSubAgentMsgs([]); }}
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-[rgba(99,102,241,0.15)] flex items-center justify-center">
+                  <Bot size={20} className="text-[var(--accent)]" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="font-semibold text-sm truncate">{s.label || s.agentId || "Unnamed"}</div>
+                  <div className="text-xs text-[var(--text-secondary)]">{s.model || "default model"}</div>
+                  <div className="text-xs text-[var(--text-secondary)] truncate" title={s.key}>{s.key.slice(-12)}</div>
+                </div>
+              </div>
+            </div>
+          ))}
+          {subAgents.length === 0 && <p className="text-[var(--text-secondary)] text-sm col-span-full">No active sub-agents found. Spawn one above!</p>}
+        </div>
+
+        {/* Chat with selected sub-agent */}
+        {selectedSubAgent && (
+          <div className="mt-4 border-t border-[var(--border)] pt-4">
+            <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
+              <MessageSquare size={14} /> Chat with {selectedSubAgent.label || selectedSubAgent.agentId}
+            </h3>
+            <div className="bg-[var(--bg-primary)] rounded-lg border border-[var(--border)] p-3 max-h-[300px] overflow-y-auto mb-3 space-y-2">
+              {subAgentMsgs.length === 0 && (
+                <p className="text-xs text-[var(--text-secondary)] italic">Send a message to start chatting with this sub-agent...</p>
+              )}
+              {subAgentMsgs.map((m, i) => (
+                <div key={i} className={`p-2 rounded text-sm ${m.role === "assistant" ? "bg-[rgba(99,102,241,0.1)]" : m.role === "user" ? "bg-[var(--bg-card)] ml-8" : "bg-[rgba(239,68,68,0.1)]"}`}>
+                  <span className="text-xs font-semibold text-[var(--text-secondary)] uppercase">{m.role}</span>
+                  <p className="text-xs mt-1 whitespace-pre-wrap">{m.content}</p>
+                </div>
+              ))}
+              {subAgentSending && <Loader2 size={14} className="animate-spin text-[var(--accent)]" />}
+            </div>
+            <div className="flex gap-2">
+              <input 
+                className={`${inputCls} flex-1`} 
+                placeholder={`Message ${selectedSubAgent.label || "sub-agent"}...`}
+                value={subAgentMsg}
+                onChange={(e) => setSubAgentMsg(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && sendToSubAgent()}
+                disabled={subAgentSending}
+              />
+              <button 
+                onClick={sendToSubAgent} 
+                disabled={subAgentSending || !subAgentMsg.trim()}
+                className="btn-primary flex items-center gap-2"
+              >
+                {subAgentSending ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+              </button>
+              <button 
+                onClick={() => { setSelectedSubAgent(null); setSubAgentMsgs([]); }}
+                className="btn-secondary flex items-center gap-2"
+              >
+                <X size={14} />
+              </button>
             </div>
           </div>
         )}
@@ -715,11 +921,43 @@ function ModelsPanel() {
   // Build a flat list of all model IDs for dropdowns
   function getAllModelIds(): string[] {
     const ids: string[] = [];
-    // From configured models
+    
+    // 1. Primary from config
+    const currentPrimary = cfg?.agents?.defaults?.model?.primary;
+    if (currentPrimary && !ids.includes(currentPrimary)) ids.push(currentPrimary);
+
+    // 2. From configured agent models (aliases)
+    const agentModels = cfg?.agents?.defaults?.models || {};
     for (const modelId of Object.keys(agentModels)) {
       if (!ids.includes(modelId)) ids.push(modelId);
     }
-    // From known models for authenticated providers
+    
+    // 3. Add common hardcoded models if not present
+    const common = [
+      "google/gemini-3-flash-preview",
+      "google/gemini-2.5-pro-preview",
+      "anthropic/claude-opus-4-6",
+      "anthropic/claude-sonnet-4-20250514",
+      "ollama-local/qwen3:8b",
+      "ollama-local/llama3:8b"
+    ];
+    for (const m of common) {
+      if (!ids.includes(m)) ids.push(m);
+    }
+
+    // 4. From custom providers in config
+    const modelProviders = cfg?.models?.providers || {};
+    for (const [pk, pv] of Object.entries(modelProviders)) {
+      const pd = pv as any;
+      if (pd?.models && Array.isArray(pd.models)) {
+        for (const m of pd.models) {
+          const id = `${pk}/${m.id}`;
+          if (!ids.includes(id)) ids.push(id);
+        }
+      }
+    }
+
+    // 5. From known models for authenticated profiles
     for (const profileKey of Object.keys(cfg?.auth?.profiles || {})) {
       const base = profileKey.split(":")[0];
       if (KNOWN_MODELS[base]) {
@@ -728,30 +966,40 @@ function ModelsPanel() {
         }
       }
     }
-    // From custom providers
-    for (const [pk, pv] of Object.entries(modelProviders)) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const pd = pv as any;
-      if (pd?.models && Array.isArray(pd.models)) {
-        for (const m of pd.models) {
-          const id = `${pk}/${m.id}`;
-          if (!ids.includes(id)) ids.push(id);
-        }
-      }
-      const knownKey = pk.includes("ollama") ? "ollama-local" : pk;
-      if (KNOWN_MODELS[knownKey]) {
-        for (const km of KNOWN_MODELS[knownKey]) {
-          if (!ids.includes(km.id)) ids.push(km.id);
-        }
-      }
-    }
-    if (primaryModel && !ids.includes(primaryModel)) ids.unshift(primaryModel);
+
     return ids;
   }
 
-  const modelProviders = cfg?.models?.providers || {};
   const agentModels = cfg?.agents?.defaults?.models || {};
-  const primaryModel = cfg?.agents?.defaults?.model?.primary || "Not set";
+  const primaryModel = cfg?.agents?.defaults?.model?.primary || "google/gemini-3-flash-preview";
+
+  async function updatePrimaryModel(newModel: string) {
+    if (!cfg || !newModel) return;
+    setFeedback("Saving default model...");
+    try {
+      const data = await invokeTool("gateway", { action: "config.get" });
+      const currentCfg = data?.parsed || data?.config || data;
+      
+      const updated = { 
+        ...currentCfg, 
+        agents: { 
+          ...currentCfg.agents, 
+          defaults: { 
+            ...currentCfg.agents?.defaults, 
+            model: { 
+              ...currentCfg.agents?.defaults?.model, 
+              primary: newModel 
+            } 
+          } 
+        } 
+      };
+      
+      await invokeTool("gateway", { action: "config.apply", raw: JSON.stringify(updated, null, 2) });
+      setFeedback("✓ Default model updated — gateway restarting");
+      setCfg(updated);
+    } catch (e: unknown) { setFeedback(`Error: ${e}`); }
+    setTimeout(() => setFeedback(""), 5000);
+  }
 
   async function setApiKeyEnv() {
     if (!newApiKey.trim()) return;
@@ -764,6 +1012,8 @@ function ModelsPanel() {
     } catch (e: unknown) { setFeedback(`Error: ${e}`); }
     setTimeout(() => setFeedback(""), 5000);
   }
+
+  const modelProviders = cfg?.models?.providers || {};
 
   return (
     <div className="space-y-6">
@@ -783,18 +1033,11 @@ function ModelsPanel() {
           <div className="text-lg font-bold text-[var(--accent)]">{primaryModel}</div>
         </div>
         <div className="flex gap-2">
-          <select className={`${selectCls} flex-1`} value={primaryModel} onChange={async (e) => {
-            const newModel = e.target.value;
-            if (!cfg || !newModel) return;
-            setFeedback("Saving default model...");
-            try {
-              const updated = { ...cfg, agents: { ...cfg.agents, defaults: { ...cfg.agents?.defaults, model: { ...cfg.agents?.defaults?.model, primary: newModel } } } };
-              await invokeTool("gateway", { action: "config.apply", raw: JSON.stringify(updated, null, 2) });
-              setFeedback("✓ Default model updated — gateway restarting");
-              setTimeout(fetchConfig, 3000);
-            } catch (e: unknown) { setFeedback(`Error: ${e}`); }
-            setTimeout(() => setFeedback(""), 5000);
-          }}>
+          <select 
+            className={`${selectCls} flex-1`} 
+            value={primaryModel} 
+            onChange={(e) => updatePrimaryModel(e.target.value)}
+          >
             {getAllModelIds().map((m) => <option key={m} value={m}>{m}</option>)}
           </select>
         </div>
@@ -925,6 +1168,23 @@ function BotHubPanel() {
   const [feedback, setFeedback] = useState("");
   const [routing, setRouting] = useState<Record<string, string>>({});
 
+  // Load from localStorage immediately for fast UI, then fetch from gateway
+  useEffect(() => {
+    const saved = localStorage.getItem("bothub-routing");
+    if (saved) {
+      try {
+        setRouting(JSON.parse(saved));
+      } catch {}
+    }
+  }, []);
+
+  // Persist to localStorage whenever routing changes
+  useEffect(() => {
+    if (Object.keys(routing).length > 0) {
+      localStorage.setItem("bothub-routing", JSON.stringify(routing));
+    }
+  }, [routing]);
+
   const roles = [
     { key: "chat", label: "💬 Chat", desc: "General conversation", rec: "ollama-local/qwen3:8b (Free) or google/gemini-3-flash-preview ($)" },
     { key: "tools", label: "🔧 Tool Use", desc: "Function calling & tool use", rec: "anthropic/claude-sonnet-4-20250514 (Best at tools)" },
@@ -939,20 +1199,30 @@ function BotHubPanel() {
       const data = await invokeTool("gateway", { action: "config.get" });
       const c = data?.parsed || data?.config || data;
       setCfg(c);
-      setRouting(c?.bothub?.routing || {});
+      // Merge gateway routing with localStorage (gateway wins if both have values)
+      const gatewayRouting = c?.bothub?.routing || {};
+      const saved = localStorage.getItem("bothub-routing");
+      const localRouting = saved ? JSON.parse(saved) : {};
+      setRouting({ ...localRouting, ...gatewayRouting });
     } catch { setCfg(null); }
     setLoading(false);
   }
   useEffect(() => { fetchConfig(); }, []);
 
   async function saveRouting() {
-    if (!cfg) return;
     setFeedback("Saving...");
+    // Always save to localStorage first (immediate)
+    localStorage.setItem("bothub-routing", JSON.stringify(routing));
     try {
-      const updated = { ...cfg, bothub: { ...(cfg.bothub || {}), routing } };
+      const data = await invokeTool("gateway", { action: "config.get" });
+      const currentCfg = data?.parsed || data?.config || data;
+      const updated = { ...currentCfg, bothub: { ...(currentCfg.bothub || {}), routing } };
       await invokeTool("gateway", { action: "config.apply", raw: JSON.stringify(updated, null, 2) });
       setFeedback("✓ Routing saved");
-    } catch (e: unknown) { setFeedback(`Error: ${e}`); }
+      setCfg(updated);
+    } catch (e: unknown) {
+      setFeedback(`Saved locally only — gateway error: ${e}`);
+    }
     setTimeout(() => setFeedback(""), 3000);
   }
 
@@ -1059,15 +1329,224 @@ function BotHubPanel() {
         </div>
       </div>
 
+      {/* Task Router — Actually spawns sub-agents with routed models */}
+      <div className="card p-5 glow-border">
+        <h2 className="section-title mb-4 flex items-center gap-2"><Send size={14} /> Task Router</h2>
+        <p className="text-sm text-[var(--text-secondary)] mb-4">
+          Send a task and BotHub will route it to the appropriate model based on your routing configuration above.
+        </p>
+        <TaskRouter routing={routing} />
+      </div>
+
       <div className="card p-5">
         <h2 className="section-title mb-2">How It Works</h2>
         <p className="text-sm text-[var(--text-secondary)]">
           BotHub configures intelligent model routing — your local Ollama model handles casual chat for free,
           Claude handles tool-heavy tasks (best at function calling), Gemini handles quick lookups (fast and cheap),
-          and Opus tackles complex coding. The primary model can delegate to specialized models as needed.
-          This maps to OpenClaw&apos;s model configuration system.
+          and Opus tackles complex coding. Tasks are spawned as sub-agents with the routed model.
         </p>
       </div>
+    </div>
+  );
+}
+
+/* ═══════════════════════ TASK ROUTER ═══════════════════════ */
+function TaskRouter({ routing }: { routing: Record<string, string> }) {
+  const [task, setTask] = useState("");
+  const [selectedRole, setSelectedRole] = useState<"auto" | "chat" | "tools" | "image" | "code" | "fast">("auto");
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<string | null>(null);
+  const [childSession, setChildSession] = useState<string | null>(null);
+  const [followUp, setFollowUp] = useState("");
+
+  const roleLabels: Record<string, string> = {
+    auto: "🤖 Auto-detect",
+    chat: "💬 Chat",
+    tools: "🔧 Tool Use",
+    image: "🖼️ Image Analysis",
+    code: "💻 Code",
+    fast: "⚡ Fast Tasks",
+  };
+
+  function detectRole(taskText: string): keyof typeof routing {
+    const t = taskText.toLowerCase();
+    if (t.includes("image") || t.includes("picture") || t.includes("photo") || t.includes("vision")) return "image";
+    if (t.includes("code") || t.includes("program") || t.includes("script") || t.includes("function") || t.includes("debug")) return "code";
+    if (t.includes("tool") || t.includes("execute") || t.includes("run") || t.includes("command")) return "tools";
+    if (t.includes("quick") || t.includes("lookup") || t.includes("check") || t.includes("summary")) return "fast";
+    return "chat";
+  }
+
+  async function sendTask() {
+    if (!task.trim()) return;
+    setLoading(true);
+    setResult(null);
+    
+    const role = selectedRole === "auto" ? detectRole(task) : selectedRole;
+    const model = routing[role] || routing["chat"] || "google/gemini-3-flash-preview";
+    
+    try {
+      const spawnResult = await invokeTool("sessions_spawn", {
+        task: `[${role.toUpperCase()}] ${task}`,
+        model,
+        label: `BotHub-${role}-${Date.now()}`,
+      });
+      
+      setChildSession(spawnResult?.childSessionKey || spawnResult?.sessionKey || null);
+      
+      // Poll for initial response
+      let attempts = 0;
+      const checkResponse = async () => {
+        if (attempts > 30) {
+          setResult("⏱️ Task spawned but response timed out. Check the child session.");
+          setLoading(false);
+          return;
+        }
+        attempts++;
+        
+        try {
+          const history = await invokeTool("sessions_history", {
+            sessionKey: spawnResult?.childSessionKey || spawnResult?.sessionKey,
+            limit: 5,
+          });
+          
+          const assistantMsgs = history?.messages?.filter((m: {role: string}) => m.role === "assistant") || [];
+          if (assistantMsgs.length > 0) {
+            const lastMsg = assistantMsgs[assistantMsgs.length - 1];
+            const content = typeof lastMsg.content === "string" 
+              ? lastMsg.content 
+              : JSON.stringify(lastMsg.content);
+            setResult(content);
+            setLoading(false);
+          } else {
+            setTimeout(checkResponse, 1000);
+          }
+        } catch {
+          setTimeout(checkResponse, 1000);
+        }
+      };
+      
+      setTimeout(checkResponse, 2000);
+      
+    } catch (e: unknown) {
+      setResult(`❌ Error: ${e instanceof Error ? e.message : String(e)}`);
+      setLoading(false);
+    }
+  }
+
+  async function sendFollowUp() {
+    if (!followUp.trim() || !childSession) return;
+    setLoading(true);
+    
+    try {
+      await invokeTool("sessions_send", {
+        sessionKey: childSession,
+        message: followUp,
+      });
+      
+      // Poll for response
+      let attempts = 0;
+      const checkResponse = async () => {
+        if (attempts > 30) {
+          setLoading(false);
+          return;
+        }
+        attempts++;
+        
+        try {
+          const history = await invokeTool("sessions_history", {
+            sessionKey: childSession,
+            limit: 10,
+          });
+          
+          const assistantMsgs = history?.messages?.filter((m: {role: string}) => m.role === "assistant") || [];
+          if (assistantMsgs.length > 0) {
+            const lastMsg = assistantMsgs[assistantMsgs.length - 1];
+            const content = typeof lastMsg.content === "string" 
+              ? lastMsg.content 
+              : JSON.stringify(lastMsg.content);
+            setResult(content);
+            setFollowUp("");
+            setLoading(false);
+          } else {
+            setTimeout(checkResponse, 1000);
+          }
+        } catch {
+          setTimeout(checkResponse, 1000);
+        }
+      };
+      
+      setTimeout(checkResponse, 1500);
+      
+    } catch (e: unknown) {
+      setResult(`❌ Error: ${e instanceof Error ? e.message : String(e)}`);
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex gap-3">
+        <select 
+          className={selectCls}
+          value={selectedRole}
+          onChange={(e) => setSelectedRole(e.target.value as typeof selectedRole)}
+        >
+          {Object.entries(roleLabels).map(([key, label]) => (
+            <option key={key} value={key}>{label}</option>
+          ))}
+        </select>
+        <div className="flex-1 text-xs text-[var(--text-secondary)] flex items-center">
+          {selectedRole === "auto" ? "BotHub will auto-detect the best model" : 
+           `Will use: ${routing[selectedRole] || "Not set — configure above"}`}
+        </div>
+      </div>
+      
+      <textarea
+        className={`${textareaCls} w-full min-h-[100px]`}
+        placeholder="Enter your task here... (e.g., 'Write a Python script to fetch weather data' or 'Analyze this image URL...')"
+        value={task}
+        onChange={(e) => setTask(e.target.value)}
+        disabled={loading}
+      />
+      
+      <button 
+        onClick={sendTask} 
+        disabled={loading || !task.trim()}
+        className="btn-primary flex items-center gap-2"
+      >
+        {loading ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+        {loading ? "Routing task..." : "Send Task"}
+      </button>
+      
+      {result && (
+        <div className="mt-4">
+          <div className="bg-[var(--bg-primary)] border border-[var(--border)] rounded-lg p-4 max-h-[400px] overflow-y-auto">
+            <div className="text-xs text-[var(--text-secondary)] mb-2">Response ({selectedRole === "auto" ? detectRole(task) : selectedRole} → {routing[selectedRole === "auto" ? detectRole(task) : selectedRole] || routing["chat"]}):</div>
+            <div className="text-sm whitespace-pre-wrap">{result}</div>
+          </div>
+          
+          {childSession && (
+            <div className="mt-3 flex gap-2">
+              <input
+                className={`${inputCls} flex-1`}
+                placeholder="Follow-up message..."
+                value={followUp}
+                onChange={(e) => setFollowUp(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && sendFollowUp()}
+                disabled={loading}
+              />
+              <button 
+                onClick={sendFollowUp}
+                disabled={loading || !followUp.trim()}
+                className="btn-secondary flex items-center gap-2"
+              >
+                {loading ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1082,10 +1561,12 @@ function ConfigPanel({ config, setConfig, loading, onRefresh }: {
   async function saveConfig() {
     setSaving(true); setFeedback("");
     try {
-      JSON.parse(config);
-      await invokeTool("gateway", { action: "config.apply", raw: config });
+      const parsed = JSON.parse(config);
+      await invokeTool("gateway", { action: "config.apply", raw: JSON.stringify(parsed, null, 2) });
       setFeedback("✓ Configuration saved and gateway restarting...");
-      onRefresh();
+      setTimeout(() => {
+        onRefresh();
+      }, 2000);
     } catch (e: unknown) {
       setFeedback(`Error: ${e instanceof SyntaxError ? "Invalid JSON — check your syntax" : e instanceof Error ? e.message : String(e)}`);
     }

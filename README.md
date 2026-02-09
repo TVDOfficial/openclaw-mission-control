@@ -87,6 +87,29 @@ node server.mjs
 
 The dashboard will be available at **http://localhost:3333**
 
+### WSL2 Users — Access from Other Devices
+
+If you're running Mission Control inside WSL2 and want to access it from other devices on your network (phone, tablet, etc.), WSL2's virtual network is isolated from your LAN. You need to port forward from Windows to WSL2:
+
+**Run in Windows PowerShell as Administrator:**
+
+```powershell
+# Port forward from Windows host to WSL2
+netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=3333 connectaddress=<WSL2_IP> connectport=3333
+
+# Open firewall
+netsh advfirewall firewall add rule name="OpenClaw Mission Control" dir=in action=allow protocol=tcp localport=3333
+```
+
+Replace `<WSL2_IP>` with your WSL2 instance IP (find it with `ip addr show eth0` in WSL).
+
+**To verify:**
+```powershell
+netsh interface portproxy show all
+```
+
+Then access via `http://<Windows_IP>:3333` from any device on your network.
+
 ## Development
 
 ```bash
