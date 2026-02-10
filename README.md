@@ -149,6 +149,70 @@ netsh interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=3333
 netsh advfirewall firewall delete rule name="OpenClaw Mission Control"
 ```
 
+## 🪟 Windows Service Setup (Auto-Start on Boot)
+
+To run Mission Control automatically when Windows starts, use [NSSM](https://nssm.cc/) (Non-Sucking Service Manager):
+
+### 1. Download NSSM
+Download from https://nssm.cc/ and extract `nssm.exe` to `C:\Program Files\nssm\` (or add to PATH).
+
+### 2. Create the Service (GUI Method - Recommended)
+
+```powershell
+# Run as Administrator
+nssm install MissionControl
+```
+
+This opens the NSSM GUI. Configure these fields:
+
+| Field | Value |
+|-------|-------|
+| **Application** | `C:\Windows\System32\wsl.exe` |
+| **Startup directory** | `C:\Windows\System32` |
+| **Arguments** | `-u tvd -e bash -lc "cd ~/.openclaw/workspace/openclaw-mission-control && exec npm run dev"` |
+
+> **Note:** Replace `tvd` with your WSL username.
+
+### 3. Configure Log On
+In the **Log On** tab:
+- Select "This account"
+- Enter `.	vd` (or your Windows username)
+- Enter your Windows password
+- This ensures WSL access works properly (LocalSystem doesn't have WSL access)
+
+### 4. Set Startup Type
+In the **General** tab:
+- Set **Startup type** to **Automatic**
+
+### 5. Install and Start
+
+```powershell
+nssm start MissionControl
+```
+
+### Manage the Service
+
+```powershell
+# Check status
+Get-Service MissionControl
+
+# Stop
+nssm stop MissionControl
+
+# Restart
+nssm restart MissionControl
+
+# Remove service (if needed)
+nssm remove MissionControl confirm
+```
+
+### Why This Works
+- Using `wsl.exe` directly (not a batch file) is more reliable for services
+- The `-e` flag ensures the WSL environment is properly loaded
+- `exec npm run dev` replaces the shell process for cleaner service management
+- Running as your user account ensures WSL and file permissions work correctly
+```
+
 ## 🔐 Environment Variables
 
 | Variable | Description | Default | Required |
